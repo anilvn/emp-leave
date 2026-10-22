@@ -1,0 +1,23 @@
+installation:
+  version: 6.12.4
+  installDate: 2026-10-22T10:52:32.230Z
+  lastUpdated: 2026-10-22T10:52:32.230Z
+  installShims: false
+modules:
+  - name: core
+    version: 6.12.4
+    installDate: 2026-10-22T10:52:30.092Z
+    lastUpdated: 2026-10-22T10:52:32.226Z
+    source: built-in
+    npmPackage: null
+    repoUrl: null
+  - name: bmm
+    version: 6.12.4
+    installDate: 2026-10-22T10:52:31.932Z
+    lastUpdated: 2026-10-22T10:52:32.230Z
+    source: built-in
+    npmPackage: null
+    repoUrl: null
+ides:
+  - claude-code
+  - github-copilot

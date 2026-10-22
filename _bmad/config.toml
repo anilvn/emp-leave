@@ -13,7 +13,7 @@
 [core]
 user_name = "BMad"
 communication_language = "English"
-project_name = "emp-leave-tracker"
+project_name = "company-leave"
 document_output_language = "English"
 output_folder = "{project-root}/_bmad-output"
 
