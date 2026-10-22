@@ -23,6 +23,7 @@ public class SessionRegistry {
     public String createSession(long userId) {
         String tokenId = UUID.randomUUID().toString();
         Instant now = Instant.now();
+        activeSessionRepository.deleteByExpiresAtBefore(now);
         activeSessionRepository.save(new ActiveSession(tokenId, userId, now, now.plus(TOKEN_LIFETIME)));
         return tokenId;
     }

@@ -47,12 +47,19 @@ class SessionRegistryTest {
                 tokenId);
         assertThat(sessionRegistry.touchOrReject(tokenId)).isFalse();
 
+        jdbcTemplate.update(
+                "update active_sessions set expires_at = now() - interval '1 minute' where token_id = ?",
+                tokenId);
         String anotherTokenId = sessionRegistry.createSession(userId);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from active_sessions where token_id = ?", Integer.class, tokenId)).isZero();
+        String secondTokenId = sessionRegistry.createSession(userId);
         assertThat(jdbcTemplate.queryForObject(
                 "select count(*) from active_sessions where user_id = ?", Integer.class, userId)).isEqualTo(2);
         sessionRegistry.revokeAllForUser(userId);
         assertThat(jdbcTemplate.queryForObject(
                 "select count(*) from active_sessions where user_id = ?", Integer.class, userId)).isZero();
         assertThat(sessionRegistry.touchOrReject(anotherTokenId)).isFalse();
+        assertThat(sessionRegistry.touchOrReject(secondTokenId)).isFalse();
     }
 }

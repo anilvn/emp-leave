@@ -2,6 +2,7 @@ package com.company.leave.auth;
 
 import java.time.Duration;
 
+import jakarta.validation.Valid;
 import com.company.leave.audit.AuditService;
 import com.company.leave.common.ApiException;
 import com.company.leave.common.ErrorCode;
@@ -43,7 +44,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<UserAccount> login(@RequestBody LoginRequest request) {
+    public ResponseEntity<UserAccount> login(@Valid @RequestBody LoginRequest request) {
         UserAccount user = userService.authenticate(request.getUsername(), request.getPassword())
                 .orElseThrow(() -> new ApiException(
                         HttpStatus.UNAUTHORIZED, ErrorCode.INVALID_CREDENTIALS, "Username or password is incorrect."));

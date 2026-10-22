@@ -9,3 +9,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-2-immutable-audit-trail-access-log.md`
   summary: `audit_events`/`access_log` have no index beyond their primary key, even though both are append-only logs later stories will filter by actor/entity/time.
   evidence: Cheaper to add now while tables are empty than later via an online migration against a live, immutable, growing table. Not added in this story because the architecture spine explicitly defers `access_log` querying/reads to "Phase 2" (no read API/UI in this POC) — there is no known query/filter pattern yet to index for, so any index now would be speculative.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-3-password-login-idle-expiring-session.md`
+  summary: Revisit CSRF/origin protections for cookie-authenticated endpoints when the trusted-origin and deployment threat model is defined.
+  evidence: `SameSite=Strict` blocks cross-site requests but not requests from an untrusted sibling subdomain. The frozen story intent explicitly excludes a CSRF token scheme and accepts `SameSite=Strict` for this POC, so additional protection needs a broader trusted-origin decision.

@@ -9,4 +9,6 @@ interface ActiveSessionRepository extends Repository<ActiveSession, String> {
     java.util.Optional<ActiveSession> findById(String tokenId);
 
     void deleteByUserId(long userId);
+
+    void deleteByExpiresAtBefore(java.time.Instant expiresAt);
 }

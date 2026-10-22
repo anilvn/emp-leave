@@ -28,8 +28,11 @@ class JwtServiceTest {
     @Test
     void rejectsTamperedSignature() {
         String token = jwtService.issue(5L, "EMPLOYEE", UUID.randomUUID().toString());
-        char replacement = token.charAt(token.length() - 1) == 'a' ? 'b' : 'a';
-        String tampered = token.substring(0, token.length() - 1) + replacement;
+        int signatureStart = token.lastIndexOf('.') + 1;
+        char replacement = token.charAt(signatureStart) == 'a' ? 'b' : 'a';
+        String tampered = token.substring(0, signatureStart)
+                + replacement
+                + token.substring(signatureStart + 1);
 
         assertThatThrownBy(() -> jwtService.parseAndValidate(tampered)).isInstanceOf(JwtException.class);
     }

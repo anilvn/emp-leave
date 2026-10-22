@@ -120,6 +120,23 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
+    void missingOrBlankCredentialsReturnValidationErrorsWithoutCookie() throws Exception {
+        mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"emp.jsmith\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(result -> assertThat(result.getResponse().getHeader("Set-Cookie")).isNull());
+
+        mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"emp.jsmith\",\"password\":\" \"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(result -> assertThat(result.getResponse().getHeader("Set-Cookie")).isNull());
+    }
+
+    @Test
     void idleSessionIsRejectedWithoutUpdatingSessionOrWritingAnAuditEvent() throws Exception {
         String token = loginAndGetToken();
         String tokenId = jwtService.parseAndValidate(token).tokenId();

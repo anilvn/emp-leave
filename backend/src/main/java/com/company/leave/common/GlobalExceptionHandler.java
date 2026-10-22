@@ -1,6 +1,8 @@
 package com.company.leave.common;
 
 import jakarta.validation.ConstraintViolationException;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  * unclassified failure, and inventing one would violate AD-11's "no extra values".
  */
 @RestControllerAdvice
+@Order(Ordered.HIGHEST_PRECEDENCE)
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(ApiException.class)

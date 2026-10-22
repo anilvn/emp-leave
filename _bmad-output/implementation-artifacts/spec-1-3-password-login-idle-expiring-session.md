@@ -100,3 +100,15 @@ Jwts.builder()...signWith(key).compact() / Jwts.parser().verifyWith(key).build()
 | Verdict | Route | Finding and evidence |
 |---|---|---|
 | medium | patch | `JwtAuthenticationFilter` was a servlet-component bean as well as a filter-chain member, risking duplicate registration and authentication loss in a deployed server; it is now instantiated only into the security chain. |
+| false | reject | The 15-minute JWT lifetime and 30-minute idle cutoff are both explicit constraints in the frozen intent and epic architecture; the code implements each limit rather than contradicting either. |
+| medium | patch | Missing/blank login fields reached `PasswordEncoder.matches` without request validation; `@NotBlank` plus `@Valid` now returns `VALIDATION_FAILED` without issuing a cookie, covered by integration tests. |
+| medium | patch | Missing-password validation was absent from the integration tests; cases for omitted and blank passwords now verify 400, canonical error code, and no cookie. |
+| medium | patch | Unknown usernames skipped BCrypt and could be distinguished by response timing; `UserService` now performs a BCrypt match against a per-process dummy hash for unknown usernames. |
+| medium | patch | The JWT filter swallowed all runtime failures, including session-store failures, as anonymous requests; it now catches only `JwtException`, allowing infrastructure errors to surface. |
+| medium | patch | Expired `active_sessions` rows were never reclaimed; session creation now deletes expired rows first, verified by the session-registry test. |
+| medium | defer | Cookie-authenticated endpoints lack CSRF/origin checks, and SameSite does not block an untrusted same-site sibling origin; the frozen intent excludes a CSRF-token scheme and accepts SameSite for this POC, so trusted-origin hardening is recorded in deferred work. |
+| false | reject | No current endpoint or service mutates `User.active`; session behavior after a future account-deactivation feature is not reachable in this story's implementation. |
+| medium | patch | The non-dev JWT property existed only in the `dev` profile, so a configured `JWT_SECRET` could not satisfy `JwtService` under `demo`; a base environment placeholder was added and a demo-profile context test passed. |
+| low | patch | The tamper test changed the final Base64URL signature character, whose unused trailing bits can leave the decoded signature unchanged; it now changes the first signature character. |
+| medium | patch | Unknown-user timing equalization was also independently reported as a response-enumeration gap; fixed by the same dummy-hash comparison recorded above. |
+| medium | patch | Null-password handling was independently reported as an uncontrolled BCrypt failure; the same request validation fix recorded above addresses it. |

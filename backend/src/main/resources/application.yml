@@ -16,6 +16,9 @@ spring:
   mvc:
     problemdetails:
       enabled: true
+security:
+  jwt:
+    secret: ${JWT_SECRET:}
 management:
   endpoints:
     web:
