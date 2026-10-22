@@ -1,12 +1,10 @@
 services:
   postgres:
-    image: postgres:16
+    image: postgres:18
     environment:
       POSTGRES_DB: leave
       POSTGRES_USER: ${DB_USERNAME:-leave}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-leave}
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -15,11 +13,39 @@ services:
       timeout: 3s
       retries: 10
 
-  mailpit:
-    image: axllent/mailpit:v1.31
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/leave
+      DB_USERNAME: ${DB_USERNAME:-leave}
+      DB_PASSWORD: ${DB_PASSWORD:-leave}
+      JWT_SECRET: ${JWT_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+
+  proxy:
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile
     ports:
-      - "1025:1025"
-      - "8025:8025"
+      - "443:443"
+    depends_on:
+      - backend
+      - frontend
 
 volumes:
   pgdata:
