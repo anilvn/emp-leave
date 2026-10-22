@@ -48,7 +48,7 @@ The POC covers 45 FRs: FR1–FR31, FR42–FR45, FR50–FR59. "Coverage" marks wh
 | FR11 | Rich request context | Full | Detail panel: employee, dates, type, balance, recent history |
 | FR12 | Approve with optional comment | Full | Approve converts reserved days to deducted days |
 | FR13 | Reject with required comment | Full | Reject disabled until comment entered; reserved days released |
-| FR14 | Team leave history | Full | Team view of approved leave by date |
+| FR14 | Team leave history | Full | Team view of approved leave by date; each entry also carries its comment thread (FR15) and History timeline (FR45), so the team view doubles as a one-call team overview |
 | FR15 | Discussion comments | Full | Comment thread on each request. No messaging or notifications for comments: users refresh the page to see new comments |
 | FR16 | Record decision, time, approver | Full | Stored on request and audit event |
 | FR17 | Block decisions outside team | Full | Only the requester's own manager (manager\_id) can decide; HR users decide their own requests |
@@ -139,6 +139,8 @@ A three-tier app: Angular front end, Java Spring Boot back end, PostgreSQL. A lo
 
 **Main API endpoints**
 
+Complete swagger reference: `backend/src/main/resources/openapi.yaml`. This table is a summary only — load the swagger file for full request/response schemas, examples and error codes when developing architecture or implementation.
+
 | Method and path | Role |
 | --- | --- |
 | POST /api/auth/login, POST /api/auth/logout, POST /api/auth/change-password | All |
@@ -146,13 +148,17 @@ A three-tier app: Angular front end, Java Spring Boot back end, PostgreSQL. A lo
 | GET /api/requests/{id}, GET /api/requests/{id}/history, GET/POST /api/requests/{id}/comments | Owner, their manager, HR |
 | GET /api/approvals/pending, POST /api/approvals/{id}/approve, POST /api/approvals/{id}/reject | Manager, or HR for top-level managers |
 | GET /api/team/leave | Manager |
-| GET/POST /api/users, POST /api/users/{id}/reset-password | HR |
+| GET/POST /api/users, GET /api/users/managers, POST /api/users/{id}/reset-password | HR |
 | GET /api/balances/me | All |
-| GET /api/balances, PUT /api/balances/{user}/{type}, POST /api/balances/{user}/{type}/adjust | HR |
+| GET /api/balances, GET /api/balances/{user}/{type}/ledger, PUT /api/balances/{user}/{type}, POST /api/balances/{user}/{type}/adjust | HR |
 | GET /api/notifications | All (own) |
 | GET /api/audit | HR (view only) |
 
-`GET /api/audit` returns `audit_events` rows only — the business-action trail (submit, edit, approve, reject, comments, balance and user changes). `access_log` (FR26, FR59) has no read API or UI in this POC: it's a backend-only security record, written by the request filter and checked directly against the database for acceptance scenarios 8 and 9. An access-log view or export is Phase 2 work, alongside the audit export already out of scope (FR48–FR49).
+`GET /api/users/managers` is not its own FR; it lists every MANAGER and every HR_ADMIN user, to populate the Manager dropdown on the "Create an account" form with real options instead of free text (supports FR19).
+
+`GET /api/balances/{user}/{type}/ledger` returns that user's `balance_ledger` rows for one leave type, oldest first — the read side of FR30's ledger, so acceptance scenario 12 ("Ledger shows amount, reason, actor and time") has an API/UI path, not just a direct database check.
+
+`GET /api/audit` returns one report per leave request (any status — Pending, Approved, Rejected or Cancelled), not a flat list of raw `audit_events` rows. Each report nests that request's full comment thread (FR15) and full History timeline (FR45), built by joining `audit_events`, `request_comments` and `leave_requests`. This gives HR the complete picture per request in one call (FR24 — HR has no scope filter), rather than a chronological action-by-action log. `access_log` (FR26, FR59) has no read API or UI in this POC: it's a backend-only security record, written by the request filter and checked directly against the database for acceptance scenarios 8 and 9. An access-log view or export is Phase 2 work, alongside the audit export already out of scope (FR48–FR49).
 
 **Business rules**
 
@@ -250,4 +256,7 @@ Confirmed on 22 Oct 2026.
 | Tech stack | Angular (TypeScript) front end, Java Spring Boot back end, PostgreSQL |
 | HR users' own leave | HR users approve their own requests (self-approval); the audit log records it as a self-approval |
 | Notifications (FR50–FR54) | In scope (Full). `sendNotification()` writes the `notifications` row to the DB and prints a log line, instead of calling a mail server. Real SMTP dispatch to a local mail catcher is a later integration |
+| User display name/title | No separate `full_name`/`job_title` columns; the UI shows `username` and `role` everywhere a person needs to be identified, role rendered as a readable label (e.g. "Manager") |
+| Balance ledger visibility (FR30) | Readable via `GET /api/balances/{user}/{type}/ledger` (HR only), not just verified against the database in tests |
+| Temporary password at account creation (FR18) | HR types it on the "Create an account" form, alongside username, role and manager; hashed into `password_hash` immediately, never stored or logged in plaintext. Intentionally asymmetric with password reset (FR20), which generates one instead of collecting it — both still land as `password_hash` + `must_change_password=true`, so no schema difference, just different UX |
 | Backups and retention (FR46, FR47, FR60, FR61) | Not planned for this POC. No backup/restore script and no retention-policy documentation are built; excluded from architecture and implementation. Revisit for a real deployment |
