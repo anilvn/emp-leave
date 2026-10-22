@@ -16,9 +16,6 @@ spring:
   mvc:
     problemdetails:
       enabled: true
-security:
-  jwt:
-    secret: ${JWT_SECRET:}
 management:
   endpoints:
     web:
@@ -30,6 +27,9 @@ spring:
   config:
     activate:
       on-profile: dev
+security:
+  jwt:
+    secret: ${JWT_SECRET:company-leave-dev-jwt-secret-change-before-production-32-bytes}
   flyway:
     out-of-order: true
 

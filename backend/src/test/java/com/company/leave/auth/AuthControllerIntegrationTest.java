@@ -1,0 +1,184 @@
+package com.company.leave.auth;
+
+import jakarta.servlet.http.Cookie;
+import javax.sql.DataSource;
+
+import com.company.leave.security.JwtService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+@Testcontainers
+class AuthControllerIntegrationTest {
+
+    @Container
+    @ServiceConnection
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
+
+    private static final String LOGIN_BODY = """
+            {"username":"emp.jsmith","password":"Passw0rd1"}
+            """;
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private DataSource dataSource;
+
+    @Autowired
+    private JwtService jwtService;
+
+    private JdbcTemplate jdbcTemplate;
+    private final java.util.Map<String, Integer> initialAuditCounts = new java.util.HashMap<>();
+
+    @BeforeEach
+    void prepareDatabase() {
+        jdbcTemplate = new JdbcTemplate(dataSource);
+        jdbcTemplate.update("delete from active_sessions");
+        for (String action : java.util.List.of("LOGIN", "LOGOUT")) {
+            initialAuditCounts.put(action, currentAuditCount(action));
+        }
+    }
+
+    @Test
+    void successfulLoginReturnsCurrentUserAndSecureCookieAndActiveUseTouchesSession() throws Exception {
+        MvcResult result = mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(LOGIN_BODY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(5))
+                .andExpect(jsonPath("$.username").value("emp.jsmith"))
+                .andExpect(jsonPath("$.role").value("EMPLOYEE"))
+                .andExpect(jsonPath("$.mustChangePassword").value(false))
+                .andReturn();
+
+        String cookieHeader = result.getResponse().getHeader("Set-Cookie");
+        assertThat(cookieHeader)
+                .contains("HttpOnly")
+                .contains("Secure")
+                .contains("SameSite=Strict")
+                .contains("Max-Age=900");
+        String token = cookieHeader.substring("access_token=".length(), cookieHeader.indexOf(';'));
+        JwtService.ParsedToken parsed = jwtService.parseAndValidate(token);
+        assertThat(parsed.userId()).isEqualTo(5L);
+        assertThat(parsed.role()).isEqualTo("EMPLOYEE");
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from active_sessions where token_id = ? and user_id = ?",
+                Integer.class, parsed.tokenId(), 5L)).isEqualTo(1);
+
+        jdbcTemplate.update(
+                "update active_sessions set last_seen_at = now() - interval '5 minutes' where token_id = ?",
+                parsed.tokenId());
+        mockMvc.perform(get("/not-a-real-endpoint").cookie(new Cookie("access_token", token)))
+                .andExpect(status().isNotFound());
+        assertThat(jdbcTemplate.queryForObject(
+                "select last_seen_at > now() - interval '1 minute' from active_sessions where token_id = ?",
+                Boolean.class, parsed.tokenId())).isTrue();
+        assertThat(auditCount("LOGIN")).isEqualTo(1);
+    }
+
+    @Test
+    void wrongPasswordAndUnknownUsernameHaveSameUnauthorizedResponseWithoutCookie() throws Exception {
+        MvcResult wrongPassword = mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"emp.jsmith\",\"password\":\"wrong\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
+                .andReturn();
+        MvcResult unknownUser = mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"not-a-user\",\"password\":\"wrong\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
+                .andReturn();
+
+        assertThat(wrongPassword.getResponse().getContentAsString())
+                .isEqualTo(unknownUser.getResponse().getContentAsString());
+        assertThat(wrongPassword.getResponse().getHeader("Set-Cookie")).isNull();
+        assertThat(unknownUser.getResponse().getHeader("Set-Cookie")).isNull();
+        assertThat(auditCount("LOGIN")).isZero();
+    }
+
+    @Test
+    void idleSessionIsRejectedWithoutUpdatingSessionOrWritingAnAuditEvent() throws Exception {
+        String token = loginAndGetToken();
+        String tokenId = jwtService.parseAndValidate(token).tokenId();
+        jdbcTemplate.update(
+                "update active_sessions set last_seen_at = now() - interval '31 minutes' where token_id = ?",
+                tokenId);
+
+        mockMvc.perform(post("/auth/logout").cookie(new Cookie("access_token", token)))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from active_sessions where token_id = ?", Integer.class, tokenId)).isEqualTo(1);
+        assertThat(auditCount("LOGIN")).isEqualTo(1);
+        assertThat(auditCount("LOGOUT")).isZero();
+    }
+
+    @Test
+    void logoutRevokesAllUserSessionsClearsCookieAndRejectsOldTokens() throws Exception {
+        String firstToken = loginAndGetToken();
+        String secondToken = loginAndGetToken();
+
+        MvcResult logout = mockMvc.perform(post("/auth/logout")
+                        .cookie(new Cookie("access_token", firstToken)))
+                .andExpect(status().isNoContent())
+                .andReturn();
+
+        assertThat(logout.getResponse().getHeader("Set-Cookie"))
+                .contains("access_token=")
+                .contains("HttpOnly")
+                .contains("Secure")
+                .contains("SameSite=Strict")
+                .contains("Max-Age=0");
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from active_sessions where user_id = 5", Integer.class)).isZero();
+        mockMvc.perform(post("/auth/logout").cookie(new Cookie("access_token", secondToken)))
+                .andExpect(status().isUnauthorized());
+        assertThat(auditCount("LOGIN")).isEqualTo(2);
+        assertThat(auditCount("LOGOUT")).isEqualTo(1);
+        assertThat(auditCount("LOGIN") + auditCount("LOGOUT")).isEqualTo(3);
+    }
+
+    private String loginAndGetToken() throws Exception {
+        MvcResult result = mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(LOGIN_BODY))
+                .andExpect(status().isOk())
+                .andReturn();
+        String cookieHeader = result.getResponse().getHeader("Set-Cookie");
+        return cookieHeader.substring("access_token=".length(), cookieHeader.indexOf(';'));
+    }
+
+    private int auditCount(String action) {
+        return currentAuditCount(action) - initialAuditCounts.get(action);
+    }
+
+    private int currentAuditCount(String action) {
+        return jdbcTemplate.queryForObject(
+                "select count(*) from audit_events where entity = 'AUTH' and action = ? "
+                        + "and actor_id = 5 and created_at is not null",
+                Integer.class, action);
+    }
+}
