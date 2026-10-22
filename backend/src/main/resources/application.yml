@@ -1,0 +1,42 @@
+spring:
+  application:
+    name: company-leave
+  profiles:
+    default: dev
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/leave}
+    username: ${DB_USERNAME:leave}
+    password: ${DB_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    locations: classpath:db/migration
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:1025}
+    properties:
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 5000
+      mail.smtp.writetimeout: 5000
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+  flyway:
+    out-of-order: true
+
+---
+spring:
+  config:
+    activate:
+      on-profile: demo
+
+---
+spring:
+  config:
+    activate:
+      on-profile: test
