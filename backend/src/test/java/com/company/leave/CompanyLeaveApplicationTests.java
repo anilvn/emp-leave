@@ -15,9 +15,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Context-load test proving the backend starts against an empty database and that
- * Flyway creates only its own {@code flyway_schema_history} bookkeeping table — this
- * story adds no domain table.
+ * Context-load test proving the backend starts against the database and that Flyway
+ * creates exactly its own bookkeeping table plus the two tables Story 1.2 adds —
+ * {@code audit_events} and {@code access_log}; no other domain table exists yet.
  */
 @SpringBootTest
 @Testcontainers
@@ -31,12 +31,12 @@ class CompanyLeaveApplicationTests {
     private DataSource dataSource;
 
     @Test
-    void contextLoadsAndFlywayCreatesOnlyItsOwnHistoryTable() {
+    void contextLoadsAndFlywayCreatesHistoryAndAuditTables() {
         JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
         List<String> tables = jdbcTemplate.queryForList(
                 "select table_name from information_schema.tables where table_schema = 'public'",
                 String.class);
 
-        assertThat(tables).containsExactly("flyway_schema_history");
+        assertThat(tables).containsExactlyInAnyOrder("flyway_schema_history", "audit_events", "access_log");
     }
 }
