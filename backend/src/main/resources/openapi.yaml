@@ -1,0 +1,2359 @@
+openapi: 3.0.3
+info:
+  title: Employee Leave Tracking System API (POC)
+  version: "0.1.0"
+  description: >
+    REST API for the Employee Leave Tracking System POC. Endpoints, roles and
+    DTOs here follow the "Main API endpoints" and "Core tables" sections of
+    the POC PRD (_bmad-output/planning-artifacts/prds/poc-prd-emp-leave-tracker-2026-10-22/prd.md).
+    Each operation is tagged `x-functional-requirements` with the FR number(s)
+    it implements, matching the PRD's own FR table.
+
+    Examples throughout use one consistent seeded demo cast (12 users, as in
+    the PRD's acceptance criteria: 1 HR admin, 1 top-level manager, 2 team
+    managers, 8 employees) and the PRD's own worked example from acceptance
+    scenario 1 (Thu 2026-10-29 to Tue 2026-11-03 = 4 working days).
+
+    Notes carried over from the PRD:
+    - Notifications (FR50-FR54): `sendNotification()` writes a `notifications`
+      row and prints a log line. It does not call a mail server. Real SMTP
+      dispatch via a local mail catcher is a later integration, not part of
+      this POC.
+    - FR46, FR47, FR60, FR61 (backups and 3-year retention) are **not planned**
+      for this POC and have no endpoints here.
+    - FR32-FR41, FR48, FR49 (Phase 2) are out of scope and have no endpoints here.
+  contact:
+    name: Anil
+servers:
+  - url: https://localhost/api
+    description: Local dev stack, behind the HTTPS reverse proxy (FR55)
+
+tags:
+  - name: Auth
+    description: Login, logout, password change (FR56-FR58)
+  - name: Leave Requests
+    description: Submit, view, edit, cancel, comment on leave requests (FR1-FR9, FR15, FR45)
+  - name: Approvals
+    description: Manager/HR decisions on pending requests (FR10-FR17)
+  - name: Team
+    description: Manager's view of their team's approved leave (FR14)
+  - name: Users
+    description: HR account administration (FR18-FR20)
+  - name: Balances
+    description: Leave balances and the balance ledger (FR6, FR27-FR31)
+  - name: Notifications
+    description: In-app notification history (FR53)
+  - name: Audit
+    description: HR-only read access to the audit trail (FR42-FR45, FR26)
+
+security:
+  - cookieAuth: []
+
+paths:
+
+  # ---------------------------------------------------------------- Auth
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in with username and password
+      description: Issues the HttpOnly/Secure/SameSite auth cookie on success (FR56).
+      x-functional-requirements: [FR56]
+      security: [] # not authenticated yet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              username: emp.jsmith
+              password: Passw0rd1
+      responses:
+        '200':
+          description: Login succeeded; auth cookie set
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: access_token=eyJhbGciOi...; HttpOnly; Secure; SameSite=Strict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUser'
+              example:
+                id: 5
+                username: emp.jsmith
+                role: EMPLOYEE
+                mustChangePassword: false
+        '401':
+          description: Invalid credentials
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Invalid credentials
+                status: 401
+                detail: Username or password is incorrect.
+                instance: /api/auth/login
+                code: INVALID_CREDENTIALS
+        '423':
+          description: Account locked after 5 failed attempts (FR57)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Account locked
+                status: 423
+                detail: Account locked until 2026-10-22T15:45:00Z after 5 failed login attempts.
+                instance: /api/auth/login
+                code: ACCOUNT_LOCKED
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Log out and clear the auth cookie
+      x-functional-requirements: [FR56]
+      responses:
+        '204':
+          description: Logged out
+
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change the current user's password
+      description: >
+        Required on first login after HR resets a password (FR20) and usable
+        any time after that (FR56).
+      x-functional-requirements: [FR20, FR56]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+            example:
+              currentPassword: Temp#2026
+              newPassword: Passw0rd1
+      responses:
+        '204':
+          description: Password changed
+        '400':
+          description: New password fails the password rule (min 8 chars, letters and numbers)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Validation failed
+                status: 400
+                detail: Password must be at least 8 characters and include both letters and numbers.
+                instance: /api/auth/change-password
+                code: VALIDATION_FAILED
+        '401':
+          description: Current password incorrect
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Invalid credentials
+                status: 401
+                detail: Current password is incorrect.
+                instance: /api/auth/change-password
+                code: INVALID_CREDENTIALS
+
+  # ------------------------------------------------------------ Requests
+  /requests:
+    get:
+      tags: [Leave Requests]
+      summary: List leave requests
+      description: >
+        Any user sees their own requests (FR4, FR5). Managers and HR use this
+        with query filters to see requests they're permitted to view; row-level
+        scoping is enforced server-side (FR22-FR24).
+      x-functional-requirements: [FR4, FR5, FR22, FR23, FR24]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/RequestStatus'
+          description: Filter by status (FR4)
+        - name: employeeId
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Only honoured for a manager's direct report or when the caller is HR
+      responses:
+        '200':
+          description: Matching leave requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LeaveRequest'
+              example:
+                - id: 101
+                  employeeId: 5
+                  approverId: 3
+                  leaveTypeId: 1
+                  startDate: "2026-10-29"
+                  endDate: "2026-11-03"
+                  workingDays: 4
+                  notes: Family trip
+                  status: PENDING
+                  submittedAt: "2026-10-22T09:15:00Z"
+                  decidedAt: null
+                  decisionComment: null
+                - id: 97
+                  employeeId: 5
+                  approverId: 3
+                  leaveTypeId: 2
+                  startDate: "2026-09-14"
+                  endDate: "2026-09-14"
+                  workingDays: 1
+                  notes: null
+                  status: APPROVED
+                  submittedAt: "2026-09-13T08:02:00Z"
+                  decidedAt: "2026-09-13T11:40:00Z"
+                  decisionComment: Feel better soon
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Leave Requests]
+      summary: Submit a leave request
+      description: >
+        Working days are computed server-side (Mon-Fri inclusive, holidays
+        ignored, whole days only). Reserves the requested days against the
+        employee's balance; refused if days exceed what's available (FR31).
+        Triggers a logged "submitted" notification to the approver (FR52, FR54).
+      x-functional-requirements: [FR1, FR2, FR3, FR9, FR31, FR52, FR54]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LeaveRequestCreate'
+            example:
+              leaveTypeId: 1
+              startDate: "2026-10-29"
+              endDate: "2026-11-03"
+              notes: Family trip
+      responses:
+        '201':
+          description: Request created, status PENDING
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaveRequest'
+              example:
+                id: 101
+                employeeId: 5
+                approverId: 3
+                leaveTypeId: 1
+                startDate: "2026-10-29"
+                endDate: "2026-11-03"
+                workingDays: 4
+                notes: Family trip
+                status: PENDING
+                submittedAt: "2026-10-22T09:15:00Z"
+                decidedAt: null
+                decisionComment: null
+        '400':
+          description: Validation failed (e.g. end date before start date, zero working days)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Validation failed
+                status: 400
+                detail: endDate (2026-10-26) must be on or after startDate (2026-10-29).
+                instance: /api/requests
+                code: VALIDATION_FAILED
+        '409':
+          description: Requested days exceed available balance (FR31)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Insufficient balance
+                status: 409
+                detail: Requested 4 working days of Vacation but only 2 days are available (6 total, 4 already reserved).
+                instance: /api/requests
+                code: INSUFFICIENT_BALANCE
+
+  /requests/{requestId}:
+    parameters:
+      - $ref: '#/components/parameters/RequestId'
+    get:
+      tags: [Leave Requests]
+      summary: Get one leave request
+      description: Visible to its owner, the owner's manager, and HR (FR22-FR24).
+      x-functional-requirements: [FR4, FR11, FR22, FR23, FR24]
+      responses:
+        '200':
+          description: The leave request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaveRequest'
+              example:
+                id: 102
+                employeeId: 5
+                approverId: 3
+                leaveTypeId: 1
+                startDate: "2026-08-10"
+                endDate: "2026-08-11"
+                workingDays: 2
+                notes: Long weekend
+                status: APPROVED
+                submittedAt: "2026-08-03T14:20:00Z"
+                decidedAt: "2026-08-04T09:05:00Z"
+                decisionComment: Approved, enjoy
+        '403':
+          description: Caller is not the owner, the owner's manager, or HR
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Access denied
+                status: 403
+                detail: You are not allowed to view leave request 102.
+                instance: /api/requests/102
+                code: ACCESS_DENIED
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Leave Requests]
+      summary: Modify a pending leave request
+      description: >
+        Only while status is PENDING, and only by the owner. Reuses the same
+        screen/form as creating a request — leave type, dates and notes are
+        all shown and editable — but recalculates only the working-day
+        reservation and logs the change (FR7). leaveTypeId is echoed back
+        unchanged; the server rejects an actual change of leave type.
+      x-functional-requirements: [FR7, FR9]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LeaveRequestUpdate'
+            example:
+              leaveTypeId: 1
+              startDate: "2026-10-30"
+              endDate: "2026-11-03"
+              notes: Trip shortened by a day
+      responses:
+        '200':
+          description: Updated request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaveRequest'
+              example:
+                id: 101
+                employeeId: 5
+                approverId: 3
+                leaveTypeId: 1
+                startDate: "2026-10-30"
+                endDate: "2026-11-03"
+                workingDays: 3
+                notes: Trip shortened by a day
+                status: PENDING
+                submittedAt: "2026-10-22T09:15:00Z"
+                decidedAt: null
+                decisionComment: null
+        '400':
+          description: Validation failed, or leaveTypeId does not match the request's existing type
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                validationFailed:
+                  summary: General validation failure
+                  value:
+                    type: about:blank
+                    title: Validation failed
+                    status: 400
+                    detail: endDate (2026-10-26) must be on or after startDate (2026-10-30).
+                    instance: /api/requests/101
+                    code: VALIDATION_FAILED
+                leaveTypeChangeNotAllowed:
+                  summary: Attempted to change leave type on an existing request
+                  value:
+                    type: about:blank
+                    title: Leave type change not allowed
+                    status: 400
+                    detail: Request 101 was submitted as Vacation (leaveTypeId 1) and cannot be changed to Sick (leaveTypeId 2). Cancel it and submit a new request instead.
+                    instance: /api/requests/101
+                    code: LEAVE_TYPE_CHANGE_NOT_ALLOWED
+        '403':
+          description: Caller is not the owner of this request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Access denied
+                status: 403
+                detail: Only the request's owner may edit it.
+                instance: /api/requests/101
+                code: ACCESS_DENIED
+        '409':
+          description: Request is no longer PENDING, or reservation would exceed available balance
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Invalid transition
+                status: 409
+                detail: Request 101 is APPROVED and can no longer be edited.
+                instance: /api/requests/101
+                code: INVALID_TRANSITION
+
+  /requests/{requestId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/RequestId'
+    post:
+      tags: [Leave Requests]
+      summary: Cancel a pending leave request
+      description: >
+        Only while status is PENDING, and only by the owner. Status becomes
+        CANCELLED, reserved days are released. The request is never deleted (FR8).
+      x-functional-requirements: [FR8]
+      responses:
+        '200':
+          description: Cancelled request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaveRequest'
+              example:
+                id: 101
+                employeeId: 5
+                approverId: 3
+                leaveTypeId: 1
+                startDate: "2026-10-30"
+                endDate: "2026-11-03"
+                workingDays: 3
+                notes: Trip shortened by a day
+                status: CANCELLED
+                submittedAt: "2026-10-22T09:15:00Z"
+                decidedAt: null
+                decisionComment: null
+        '403':
+          description: Caller is not the owner of this request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Access denied
+                status: 403
+                detail: Only the request's owner may cancel it.
+                instance: /api/requests/101/cancel
+                code: ACCESS_DENIED
+        '409':
+          description: Request is no longer PENDING
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Invalid transition
+                status: 409
+                detail: Request 101 is already APPROVED and cannot be cancelled.
+                instance: /api/requests/101/cancel
+                code: INVALID_TRANSITION
+
+  /requests/{requestId}/history:
+    parameters:
+      - $ref: '#/components/parameters/RequestId'
+    get:
+      tags: [Leave Requests]
+      summary: Request History tab
+      description: >
+        Timeline merging submission, edits, comments and the decision, in
+        order (FR45). Visible to the owner, their manager, and HR.
+      x-functional-requirements: [FR45]
+      responses:
+        '200':
+          description: Ordered history entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HistoryEntry'
+              example:
+                - type: SUBMITTED
+                  actorId: 5
+                  occurredAt: "2026-10-22T09:15:00Z"
+                  detail: Submitted Vacation, 2026-10-29 to 2026-11-03 (4 working days)
+                - type: EDITED
+                  actorId: 5
+                  occurredAt: "2026-10-22T10:02:00Z"
+                  detail: Changed to 2026-10-30 to 2026-11-03 (3 working days)
+                - type: COMMENT
+                  actorId: 3
+                  occurredAt: "2026-10-22T13:40:00Z"
+                  detail: Can you cover the Tuesday handover before you leave?
+                - type: APPROVED
+                  actorId: 3
+                  occurredAt: "2026-10-23T08:50:00Z"
+                  detail: Enjoy your trip!
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /requests/{requestId}/comments:
+    parameters:
+      - $ref: '#/components/parameters/RequestId'
+    get:
+      tags: [Leave Requests]
+      summary: List comments on a request
+      description: No real-time push; the client refreshes to see new comments (FR15).
+      x-functional-requirements: [FR15]
+      responses:
+        '200':
+          description: Comments, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Comment'
+              example:
+                - id: 44
+                  requestId: 101
+                  authorId: 3
+                  body: Can you cover the Tuesday handover before you leave?
+                  createdAt: "2026-10-22T13:40:00Z"
+                - id: 45
+                  requestId: 101
+                  authorId: 5
+                  body: Yes, I'll hand off to Priya before I go.
+                  createdAt: "2026-10-22T14:05:00Z"
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Leave Requests]
+      summary: Add a comment
+      description: Sends no email or in-app alert — comments are refresh-to-see only (FR15).
+      x-functional-requirements: [FR15]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommentCreate'
+            example:
+              body: Can you cover the Tuesday handover before you leave?
+      responses:
+        '201':
+          description: Comment added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+              example:
+                id: 44
+                requestId: 101
+                authorId: 3
+                body: Can you cover the Tuesday handover before you leave?
+                createdAt: "2026-10-22T13:40:00Z"
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ----------------------------------------------------------- Approvals
+  /approvals/pending:
+    get:
+      tags: [Approvals]
+      summary: Pending Approvals dashboard
+      description: >
+        Requests awaiting a decision from the caller: direct reports for a
+        manager, or top-level managers' requests for HR (FR10, FR17). Each
+        entry is the full FR11 "rich request context" — employee, dates,
+        type, balance, recent history — plus the comment thread (FR15), so
+        the approver can decide from this one call without opening the
+        request separately.
+      x-functional-requirements: [FR10, FR11, FR15, FR17, FR45]
+      responses:
+        '200':
+          description: Pending requests awaiting this approver, with full context
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalDetail'
+              example:
+                - id: 101
+                  employeeId: 5
+                  approverId: 3
+                  leaveTypeId: 1
+                  startDate: "2026-10-30"
+                  endDate: "2026-11-03"
+                  workingDays: 3
+                  notes: Trip shortened by a day
+                  status: PENDING
+                  submittedAt: "2026-10-22T09:15:00Z"
+                  decidedAt: null
+                  decisionComment: null
+                  employeeUsername: emp.jsmith
+                  leaveTypeName: Vacation
+                  balance:
+                    userId: 5
+                    leaveTypeId: 1
+                    totalDays: 20
+                    reservedDays: 3
+                    availableDays: 17
+                  comments:
+                    - id: 44
+                      requestId: 101
+                      authorId: 3
+                      body: Can you cover the Tuesday handover before you leave?
+                      createdAt: "2026-10-22T13:40:00Z"
+                    - id: 45
+                      requestId: 101
+                      authorId: 5
+                      body: Yes, I'll hand off to Priya before I go.
+                      createdAt: "2026-10-22T14:05:00Z"
+                  history:
+                    - type: SUBMITTED
+                      actorId: 5
+                      occurredAt: "2026-10-22T09:15:00Z"
+                      detail: Submitted Vacation, 2026-10-29 to 2026-11-03 (4 working days)
+                    - type: EDITED
+                      actorId: 5
+                      occurredAt: "2026-10-22T10:02:00Z"
+                      detail: Changed to 2026-10-30 to 2026-11-03 (3 working days)
+                    - type: COMMENT
+                      actorId: 3
+                      occurredAt: "2026-10-22T13:40:00Z"
+                      detail: Can you cover the Tuesday handover before you leave?
+                    - type: COMMENT
+                      actorId: 5
+                      occurredAt: "2026-10-22T14:05:00Z"
+                      detail: Yes, I'll hand off to Priya before I go.
+                - id: 115
+                  employeeId: 6
+                  approverId: 3
+                  leaveTypeId: 3
+                  startDate: "2026-11-16"
+                  endDate: "2026-11-20"
+                  workingDays: 5
+                  notes: null
+                  status: PENDING
+                  submittedAt: "2026-10-20T11:00:00Z"
+                  decidedAt: null
+                  decisionComment: null
+                  employeeUsername: emp.alee
+                  leaveTypeName: Parental
+                  balance:
+                    userId: 6
+                    leaveTypeId: 3
+                    totalDays: 60
+                    reservedDays: 5
+                    availableDays: 55
+                  comments: []
+                  history:
+                    - type: SUBMITTED
+                      actorId: 6
+                      occurredAt: "2026-10-20T11:00:00Z"
+                      detail: Submitted Parental, 2026-11-16 to 2026-11-20 (5 working days)
+
+  /approvals/{requestId}/approve:
+    parameters:
+      - $ref: '#/components/parameters/RequestId'
+    post:
+      tags: [Approvals]
+      summary: Approve a pending request
+      description: >
+        Comment is optional. Reserved days become deducted days. Only the
+        request's assigned approver may decide (FR17), except HR deciding
+        its own request (self-approval, FR12, FR16).
+      x-functional-requirements: [FR12, FR16, FR17, FR50, FR54]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionRequest'
+            example:
+              comment: Enjoy your trip!
+      responses:
+        '200':
+          description: Approved request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaveRequest'
+              example:
+                id: 101
+                employeeId: 5
+                approverId: 3
+                leaveTypeId: 1
+                startDate: "2026-10-30"
+                endDate: "2026-11-03"
+                workingDays: 3
+                notes: Trip shortened by a day
+                status: APPROVED
+                submittedAt: "2026-10-22T09:15:00Z"
+                decidedAt: "2026-10-23T08:50:00Z"
+                decisionComment: Enjoy your trip!
+        '403':
+          description: Caller is not this request's assigned approver
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Access denied
+                status: 403
+                detail: You are not the approver for request 101.
+                instance: /api/approvals/101/approve
+                code: ACCESS_DENIED
+        '409':
+          description: Request is no longer PENDING
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Invalid transition
+                status: 409
+                detail: Request 101 is already APPROVED.
+                instance: /api/approvals/101/approve
+                code: INVALID_TRANSITION
+
+  /approvals/{requestId}/reject:
+    parameters:
+      - $ref: '#/components/parameters/RequestId'
+    post:
+      tags: [Approvals]
+      summary: Reject a pending request
+      description: >
+        Comment is required and non-blank; rejection is blocked without one.
+        Reserved days are released (FR13, FR16).
+      x-functional-requirements: [FR13, FR16, FR17, FR51, FR54]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionRequest'
+            example:
+              comment: Please resubmit after the month-end close on Nov 10 — this week is too close to the deadline.
+      responses:
+        '200':
+          description: Rejected request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaveRequest'
+              example:
+                id: 101
+                employeeId: 5
+                approverId: 3
+                leaveTypeId: 1
+                startDate: "2026-10-30"
+                endDate: "2026-11-03"
+                workingDays: 3
+                notes: Trip shortened by a day
+                status: REJECTED
+                submittedAt: "2026-10-22T09:15:00Z"
+                decidedAt: "2026-10-23T08:50:00Z"
+                decisionComment: Please resubmit after the month-end close on Nov 10 — this week is too close to the deadline.
+        '400':
+          description: Comment missing or blank (FR13)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Comment required
+                status: 400
+                detail: A non-blank comment is required to reject a request.
+                instance: /api/approvals/101/reject
+                code: COMMENT_REQUIRED
+        '403':
+          description: Caller is not this request's assigned approver
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Access denied
+                status: 403
+                detail: You are not the approver for request 101.
+                instance: /api/approvals/101/reject
+                code: ACCESS_DENIED
+        '409':
+          description: Request is no longer PENDING
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Invalid transition
+                status: 409
+                detail: Request 101 is already REJECTED.
+                instance: /api/approvals/101/reject
+                code: INVALID_TRANSITION
+
+  # ---------------------------------------------------------------- Team
+  /team/leave:
+    get:
+      tags: [Team]
+      summary: Team leave by date
+      description: >
+        Manager's view of their team's approved leave (FR14, FR23). Each
+        entry also carries the request's full comment thread between
+        employee, manager and HR (FR15), and its History timeline of when
+        each change happened (FR45) — so the team calendar doubles as a
+        one-call team overview, not just dates.
+      x-functional-requirements: [FR14, FR15, FR23, FR45]
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Approved leave in the team, by date, with comments and history per entry
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TeamLeaveEntry'
+              example:
+                - requestId: 97
+                  employeeId: 5
+                  leaveTypeId: 1
+                  startDate: "2026-08-10"
+                  endDate: "2026-08-11"
+                  workingDays: 2
+                  status: APPROVED
+                  comments:
+                    - id: 44
+                      requestId: 97
+                      authorId: 3
+                      body: Can you cover the Tuesday handover before you leave?
+                      createdAt: "2026-08-03T13:40:00Z"
+                    - id: 45
+                      requestId: 97
+                      authorId: 5
+                      body: Yes, I'll hand off to Priya before I go.
+                      createdAt: "2026-08-03T14:05:00Z"
+                  history:
+                    - type: SUBMITTED
+                      actorId: 5
+                      occurredAt: "2026-08-03T09:15:00Z"
+                      detail: Submitted Vacation, 2026-08-10 to 2026-08-11 (2 working days)
+                    - type: COMMENT
+                      actorId: 3
+                      occurredAt: "2026-08-03T13:40:00Z"
+                      detail: Can you cover the Tuesday handover before you leave?
+                    - type: COMMENT
+                      actorId: 5
+                      occurredAt: "2026-08-03T14:05:00Z"
+                      detail: Yes, I'll hand off to Priya before I go.
+                    - type: APPROVED
+                      actorId: 3
+                      occurredAt: "2026-08-04T09:05:00Z"
+                      detail: Approved, enjoy
+                - requestId: 112
+                  employeeId: 6
+                  leaveTypeId: 2
+                  startDate: "2026-09-21"
+                  endDate: "2026-09-21"
+                  workingDays: 1
+                  status: APPROVED
+                  comments: []
+                  history:
+                    - type: SUBMITTED
+                      actorId: 6
+                      occurredAt: "2026-09-18T07:50:00Z"
+                      detail: Submitted Sick, 2026-09-21 to 2026-09-21 (1 working day)
+                    - type: APPROVED
+                      actorId: 4
+                      occurredAt: "2026-09-18T08:10:00Z"
+                      detail: Feel better soon
+        '403':
+          description: Caller does not have the MANAGER role
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Access denied
+                status: 403
+                detail: Only managers have a team leave view.
+                instance: /api/team/leave
+                code: ACCESS_DENIED
+
+  # --------------------------------------------------------------- Users
+  /users:
+    get:
+      tags: [Users]
+      summary: List user accounts
+      description: HR only; no scope filter (FR24).
+      x-functional-requirements: [FR24]
+      responses:
+        '200':
+          description: All user accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+              example:
+                - id: 1
+                  username: hr.admin
+                  fullName: Priya Nair
+                  jobTitle: HR Administrator
+                  role: HR_ADMIN
+                  managerId: null
+                  mustChangePassword: false
+                  active: true
+                - id: 3
+                  username: mgr.chen
+                  fullName: David Chen
+                  jobTitle: Engineering Manager
+                  role: MANAGER
+                  managerId: 2
+                  mustChangePassword: false
+                  active: true
+                - id: 5
+                  username: emp.jsmith
+                  fullName: Jamie Smith
+                  jobTitle: Software Engineer
+                  role: EMPLOYEE
+                  managerId: 3
+                  mustChangePassword: false
+                  active: true
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Users]
+      summary: Create a user account
+      description: >
+        "Create an account" form (HR only): Full name, Job title, Role and
+        Manager, matching the admin UI. Role and Manager are both selected
+        from dropdowns — Role from the fixed three-value enum, Manager from
+        GET /users/managers. Top-level managers report to an HR user
+        (FR18, FR19), so managerId may be an HR_ADMIN's id, not just a MANAGER's.
+      x-functional-requirements: [FR18, FR19]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+            example:
+              fullName: Bo Lee
+              jobTitle: Support Engineer
+              username: emp.blee
+              role: EMPLOYEE
+              managerId: 4
+              temporaryPassword: Temp#2026
+      responses:
+        '201':
+          description: Created user, must change password on first login
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+              example:
+                id: 13
+                username: emp.blee
+                fullName: Bo Lee
+                jobTitle: Support Engineer
+                role: EMPLOYEE
+                managerId: 4
+                mustChangePassword: true
+                active: true
+        '400':
+          description: A required field is missing, managerId doesn't match the chosen role, or username is already taken
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                missingField:
+                  summary: Full name, job title or manager not selected
+                  value:
+                    type: about:blank
+                    title: Validation failed
+                    status: 400
+                    detail: fullName, jobTitle and managerId are required when role is EMPLOYEE or MANAGER.
+                    instance: /api/users
+                    code: VALIDATION_FAILED
+                invalidManager:
+                  summary: Selected "Manager" isn't a MANAGER or HR_ADMIN
+                  value:
+                    type: about:blank
+                    title: Validation failed
+                    status: 400
+                    detail: User 5 (emp.jsmith) has role EMPLOYEE and cannot be selected as a Manager.
+                    instance: /api/users
+                    code: VALIDATION_FAILED
+        '403':
+          description: Caller is not HR
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Access denied
+                status: 403
+                detail: Only HR can create user accounts.
+                instance: /api/users
+                code: ACCESS_DENIED
+
+  /users/managers:
+    get:
+      tags: [Users]
+      summary: Manager dropdown options for the "Create an account" form
+      description: >
+        HR only. Everyone eligible to be selected in the Manager dropdown —
+        every MANAGER plus every HR_ADMIN, since a new top-level manager
+        reports to an HR user, not another manager (FR19). Not a
+        functional requirement on its own; it exists to back the Manager *
+        field on FR18/FR19's create-account form with real options instead
+        of free text.
+      x-functional-requirements: [FR19]
+      responses:
+        '200':
+          description: Users selectable as "Manager"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ManagerOption'
+              example:
+                - id: 1
+                  fullName: Priya Nair
+                  jobTitle: HR Administrator
+                  role: HR_ADMIN
+                - id: 2
+                  fullName: Alex Rossi
+                  jobTitle: Director of Operations
+                  role: MANAGER
+                - id: 3
+                  fullName: David Chen
+                  jobTitle: Engineering Manager
+                  role: MANAGER
+                - id: 4
+                  fullName: Maria Ortiz
+                  jobTitle: Support Manager
+                  role: MANAGER
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /users/{userId}/reset-password:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      tags: [Users]
+      summary: Reset a user's password
+      description: >
+        HR sets a temporary password; the user must change it at next login (FR20).
+      x-functional-requirements: [FR20]
+      responses:
+        '200':
+          description: Temporary password issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemporaryPassword'
+              example:
+                temporaryPassword: Temp#8841
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No such user
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Not found
+                status: 404
+                detail: User 999 does not exist.
+                instance: /api/users/999/reset-password
+                code: NOT_FOUND
+
+  # ------------------------------------------------------------ Balances
+  /balances/me:
+    get:
+      tags: [Balances]
+      summary: My balances
+      description: Total, reserved and available days per leave type, for the caller (FR6).
+      x-functional-requirements: [FR6]
+      responses:
+        '200':
+          description: Caller's balances, one row per leave type
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Balance'
+              example:
+                - userId: 5
+                  leaveTypeId: 1
+                  totalDays: 20
+                  reservedDays: 4
+                  availableDays: 16
+                - userId: 5
+                  leaveTypeId: 2
+                  totalDays: 10
+                  reservedDays: 0
+                  availableDays: 10
+
+  /balances:
+    get:
+      tags: [Balances]
+      summary: All balances
+      description: HR only (FR27).
+      x-functional-requirements: [FR27]
+      parameters:
+        - name: userId
+          in: query
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Balances, optionally filtered by user
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Balance'
+              example:
+                - userId: 5
+                  leaveTypeId: 1
+                  totalDays: 20
+                  reservedDays: 4
+                  availableDays: 16
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /balances/{userId}/{leaveTypeId}:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: leaveTypeId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    put:
+      tags: [Balances]
+      summary: Set a balance
+      description: HR only. Reason is required; writes a ledger row (FR28, FR30).
+      x-functional-requirements: [FR28, FR30, FR31]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BalanceSet'
+            example:
+              totalDays: 20
+              reason: Annual Vacation allotment for 2027
+      responses:
+        '200':
+          description: Updated balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Balance'
+              example:
+                userId: 5
+                leaveTypeId: 1
+                totalDays: 20
+                reservedDays: 4
+                availableDays: 16
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Would take the balance below reserved/zero days (FR31)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Insufficient balance
+                status: 409
+                detail: Cannot set total to 2 days; 4 days are already reserved for pending requests.
+                instance: /api/balances/5/1
+                code: INSUFFICIENT_BALANCE
+
+  /balances/{userId}/{leaveTypeId}/adjust:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: leaveTypeId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      tags: [Balances]
+      summary: Adjust a balance by +/- days
+      description: HR only. Reason is required; writes a ledger row (FR29, FR30).
+      x-functional-requirements: [FR29, FR30, FR31]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BalanceAdjust'
+            example:
+              changeDays: 2
+              reason: Carryover correction after manual review
+      responses:
+        '200':
+          description: Updated balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Balance'
+              example:
+                userId: 5
+                leaveTypeId: 1
+                totalDays: 22
+                reservedDays: 4
+                availableDays: 18
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Adjustment would take the balance below zero (FR31)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Insufficient balance
+                status: 409
+                detail: "Adjustment of -15 days would take the Vacation balance below zero (current available: 16)."
+                instance: /api/balances/5/1/adjust
+                code: INSUFFICIENT_BALANCE
+
+  # -------------------------------------------------------- Notifications
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: My notification history
+      description: >
+        In-app list of the notifications `sendNotification()` has logged for
+        the caller (FR53). Independent of whether a real email was ever sent
+        — it isn't, in this POC.
+      x-functional-requirements: [FR53]
+      responses:
+        '200':
+          description: Caller's own notification log rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Notification'
+              example:
+                - id: 220
+                  userId: 3
+                  requestId: 101
+                  kind: SUBMITTED
+                  subject: "New leave request from emp.jsmith: Vacation, 2026-10-29 to 2026-11-03"
+                  sentAt: "2026-10-22T09:15:01Z"
+                - id: 231
+                  userId: 5
+                  requestId: 101
+                  kind: APPROVED
+                  subject: "Your Vacation request (2026-10-30 to 2026-11-03) was approved"
+                  sentAt: "2026-10-23T08:50:01Z"
+
+  # --------------------------------------------------------------- Audit
+  /audit:
+    get:
+      tags: [Audit]
+      summary: Audit trail
+      description: >
+        HR, view only. No filters — every call returns the full audit
+        trail. One detailed report per leave request — not a flat
+        action-by-action log — built from the insert-only audit log
+        (FR42-FR45) and request_comments (FR15). Every employee's every
+        request appears, regardless of status (PENDING, APPROVED,
+        REJECTED or CANCELLED), with its full comment thread and its
+        full History timeline nested inside, so HR gets the complete
+        picture for every request in one call (FR24 — HR has no scope
+        filter).
+      x-functional-requirements: [FR42, FR43, FR44, FR45, FR15, FR24, FR26]
+      responses:
+        '200':
+          description: >
+            Every employee's requests, any status, each with its comments
+            and history nested, newest submission first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditRequestReport'
+              example:
+                - requestId: 101
+                  employeeId: 5
+                  employeeUsername: emp.jsmith
+                  leaveTypeId: 1
+                  leaveTypeName: Vacation
+                  startDate: "2026-10-30"
+                  endDate: "2026-11-03"
+                  workingDays: 3
+                  status: PENDING
+                  comments:
+                    - id: 44
+                      requestId: 101
+                      authorId: 3
+                      body: Can you cover the Tuesday handover before you leave?
+                      createdAt: "2026-10-22T13:40:00Z"
+                    - id: 45
+                      requestId: 101
+                      authorId: 5
+                      body: Yes, I'll hand off to Priya before I go.
+                      createdAt: "2026-10-22T14:05:00Z"
+                  history:
+                    - type: SUBMITTED
+                      actorId: 5
+                      occurredAt: "2026-10-22T09:15:00Z"
+                      detail: Submitted Vacation, 2026-10-29 to 2026-11-03 (4 working days)
+                    - type: EDITED
+                      actorId: 5
+                      occurredAt: "2026-10-22T10:02:00Z"
+                      detail: Changed to 2026-10-30 to 2026-11-03 (3 working days)
+                    - type: COMMENT
+                      actorId: 3
+                      occurredAt: "2026-10-22T13:40:00Z"
+                      detail: Can you cover the Tuesday handover before you leave?
+                    - type: COMMENT
+                      actorId: 5
+                      occurredAt: "2026-10-22T14:05:00Z"
+                      detail: Yes, I'll hand off to Priya before I go.
+                - requestId: 97
+                  employeeId: 5
+                  employeeUsername: emp.jsmith
+                  leaveTypeId: 1
+                  leaveTypeName: Vacation
+                  startDate: "2026-08-10"
+                  endDate: "2026-08-11"
+                  workingDays: 2
+                  status: APPROVED
+                  comments:
+                    - id: 44
+                      requestId: 97
+                      authorId: 3
+                      body: Can you cover the Tuesday handover before you leave?
+                      createdAt: "2026-08-03T13:40:00Z"
+                    - id: 45
+                      requestId: 97
+                      authorId: 5
+                      body: Yes, I'll hand off to Priya before I go.
+                      createdAt: "2026-08-03T14:05:00Z"
+                  history:
+                    - type: SUBMITTED
+                      actorId: 5
+                      occurredAt: "2026-08-03T09:15:00Z"
+                      detail: Submitted Vacation, 2026-08-10 to 2026-08-11 (2 working days)
+                    - type: COMMENT
+                      actorId: 3
+                      occurredAt: "2026-08-03T13:40:00Z"
+                      detail: Can you cover the Tuesday handover before you leave?
+                    - type: COMMENT
+                      actorId: 5
+                      occurredAt: "2026-08-03T14:05:00Z"
+                      detail: Yes, I'll hand off to Priya before I go.
+                    - type: APPROVED
+                      actorId: 3
+                      occurredAt: "2026-08-04T09:05:00Z"
+                      detail: Approved, enjoy
+                - requestId: 112
+                  employeeId: 6
+                  employeeUsername: emp.alee
+                  leaveTypeId: 2
+                  leaveTypeName: Sick
+                  startDate: "2026-09-21"
+                  endDate: "2026-09-21"
+                  workingDays: 1
+                  status: APPROVED
+                  comments: []
+                  history:
+                    - type: SUBMITTED
+                      actorId: 6
+                      occurredAt: "2026-09-18T07:50:00Z"
+                      detail: Submitted Sick, 2026-09-21 to 2026-09-21 (1 working day)
+                    - type: APPROVED
+                      actorId: 4
+                      occurredAt: "2026-09-18T08:10:00Z"
+                      detail: Feel better soon
+                - requestId: 90
+                  employeeId: 6
+                  employeeUsername: emp.alee
+                  leaveTypeId: 4
+                  leaveTypeName: Sabbatical
+                  startDate: "2026-07-06"
+                  endDate: "2026-07-17"
+                  workingDays: 10
+                  status: REJECTED
+                  comments: []
+                  history:
+                    - type: SUBMITTED
+                      actorId: 6
+                      occurredAt: "2026-06-29T10:00:00Z"
+                      detail: Submitted Sabbatical, 2026-07-06 to 2026-07-17 (10 working days)
+                    - type: REJECTED
+                      actorId: 4
+                      occurredAt: "2026-06-30T09:00:00Z"
+                      detail: Not enough Sabbatical balance accrued yet; resubmit after your 5-year anniversary in 2027.
+        '403':
+          description: Caller is not HR
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Access denied
+                status: 403
+                detail: Only HR can view the audit trail.
+                instance: /api/audit
+                code: ACCESS_DENIED
+
+components:
+
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description: >
+        Session cookie set by POST /auth/login. HttpOnly, Secure, SameSite
+        cookie; 30-minute inactivity timeout (FR58). Not a bearer token in
+        JavaScript-readable storage.
+
+  parameters:
+    RequestId:
+      name: requestId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+
+  responses:
+    Forbidden:
+      description: >
+        Caller is not allowed to see or act on this resource. A 403 here
+        always writes an access-log entry (FR25, FR26).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            type: about:blank
+            title: Access denied
+            status: 403
+            detail: You do not have permission to access this resource.
+            code: ACCESS_DENIED
+    NotFound:
+      description: No such resource
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            type: about:blank
+            title: Not found
+            status: 404
+            detail: The requested resource does not exist.
+            code: NOT_FOUND
+    ValidationError:
+      description: Request body failed validation
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            type: about:blank
+            title: Validation failed
+            status: 400
+            detail: One or more fields failed validation.
+            code: VALIDATION_FAILED
+
+  schemas:
+
+    # ---- enums -------------------------------------------------------
+    Role:
+      type: string
+      description: The three RBAC roles (FR21)
+      enum: [EMPLOYEE, MANAGER, HR_ADMIN]
+
+    RequestStatus:
+      type: string
+      description: Leave request lifecycle status (FR4)
+      enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+
+    LedgerKind:
+      type: string
+      description: Why a balance_ledger row was written
+      enum: [SET, ADJUST, RESERVE, RELEASE, DEDUCT]
+
+    NotificationKind:
+      type: string
+      description: Which event triggered sendNotification() (FR50-FR52)
+      enum: [SUBMITTED, APPROVED, REJECTED]
+
+    HistoryEntryType:
+      type: string
+      description: What kind of event appears on the request History tab (FR45)
+      enum: [SUBMITTED, EDITED, CANCELLED, APPROVED, REJECTED, COMMENT]
+
+    # ---- auth ----------------------------------------------------------
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+      example:
+        username: emp.jsmith
+        password: Passw0rd1
+
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+          format: password
+        newPassword:
+          type: string
+          format: password
+          description: Minimum 8 characters, letters and numbers
+      example:
+        currentPassword: Temp#2026
+        newPassword: Passw0rd1
+
+    CurrentUser:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+        mustChangePassword:
+          type: boolean
+      example:
+        id: 5
+        username: emp.jsmith
+        role: EMPLOYEE
+        mustChangePassword: false
+
+    # ---- users -----------------------------------------------------------
+    User:
+      type: object
+      description: >
+        users table (FR18-FR20), plus fullName and jobTitle shown on the
+        "Create an account" form. NOTE: the PRD's users table (prd.md Core
+        tables) does not list full_name or job_title columns — this schema
+        assumes those columns are added; flag if that's not actually planned.
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+        fullName:
+          type: string
+        jobTitle:
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+        managerId:
+          type: integer
+          format: int64
+          nullable: true
+          description: Null only for the HR user(s) at the top of the chain
+        mustChangePassword:
+          type: boolean
+        active:
+          type: boolean
+      example:
+        id: 5
+        username: emp.jsmith
+        fullName: Jamie Smith
+        jobTitle: Software Engineer
+        role: EMPLOYEE
+        managerId: 3
+        mustChangePassword: false
+        active: true
+
+    UserCreate:
+      type: object
+      description: >
+        Body for the "Create an account" form. fullName, jobTitle, role and
+        managerId are all required on the form (marked * there); username
+        and temporaryPassword aren't shown in the pasted form fragment but
+        are kept here since FR18/FR20 need a login name and an initial
+        password — confirm whether the form generates these instead of
+        collecting them.
+      required: [fullName, jobTitle, username, role, temporaryPassword]
+      properties:
+        fullName:
+          type: string
+          description: "Full name * — required for every role"
+        jobTitle:
+          type: string
+          description: "Job title * — required for every role"
+        username:
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+          description: "Role * — dropdown: Employee, Manager, HR_ADMIN"
+        managerId:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            Manager * — dropdown populated from GET /users/managers.
+            Required unless role is HR_ADMIN; must be the id of a user with
+            role MANAGER or HR_ADMIN (top-level managers report to HR).
+        temporaryPassword:
+          type: string
+          format: password
+      example:
+        fullName: Bo Lee
+        jobTitle: Support Engineer
+        username: emp.blee
+        role: EMPLOYEE
+        managerId: 4
+        temporaryPassword: Temp#2026
+
+    ManagerOption:
+      type: object
+      description: >
+        One selectable option in the "Manager *" dropdown on the
+        create-account form — every MANAGER plus every HR_ADMIN (FR19).
+      properties:
+        id:
+          type: integer
+          format: int64
+        fullName:
+          type: string
+        jobTitle:
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+      example:
+        id: 3
+        fullName: David Chen
+        jobTitle: Engineering Manager
+        role: MANAGER
+
+    TemporaryPassword:
+      type: object
+      properties:
+        temporaryPassword:
+          type: string
+      example:
+        temporaryPassword: Temp#8841
+
+    # ---- leave requests ----------------------------------------------
+    LeaveRequestCreate:
+      type: object
+      required: [leaveTypeId, startDate, endDate]
+      properties:
+        leaveTypeId:
+          type: integer
+          format: int64
+          description: References leave_types (Vacation, Sick, Parental, Sabbatical)
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+          description: Must be on or after startDate
+        notes:
+          type: string
+          nullable: true
+          description: Optional free text (FR3)
+      example:
+        leaveTypeId: 1
+        startDate: "2026-10-29"
+        endDate: "2026-11-03"
+        notes: Family trip
+
+    LeaveRequestUpdate:
+      type: object
+      description: >
+        Same fields as LeaveRequestCreate — the edit screen reuses the create
+        form, pre-filled with the request's current values (FR7).
+        leaveTypeId must still reference a valid leave_types row; it is
+        accepted here for form parity but the server rejects an actual change
+        of type on an existing request (see the 400 LEAVE_TYPE_CHANGE_NOT_ALLOWED
+        example below) — resubmit as a new request to change the leave type.
+      required: [leaveTypeId, startDate, endDate]
+      properties:
+        leaveTypeId:
+          type: integer
+          format: int64
+          description: Must match the request's existing leaveTypeId; changing it is rejected
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        notes:
+          type: string
+          nullable: true
+          description: Reason/notes for the request (FR3)
+      example:
+        leaveTypeId: 1
+        startDate: "2026-10-30"
+        endDate: "2026-11-03"
+        notes: Trip shortened by a day
+
+    LeaveRequest:
+      type: object
+      description: leave_requests table (FR1-FR9)
+      properties:
+        id:
+          type: integer
+          format: int64
+        employeeId:
+          type: integer
+          format: int64
+        approverId:
+          type: integer
+          format: int64
+          description: The manager (or HR, for a top-level manager's own request) who may decide
+        leaveTypeId:
+          type: integer
+          format: int64
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        workingDays:
+          type: integer
+          description: Mon-Fri inclusive, holidays ignored, whole days only (FR2)
+        notes:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/RequestStatus'
+        submittedAt:
+          type: string
+          format: date-time
+        decidedAt:
+          type: string
+          format: date-time
+          nullable: true
+        decisionComment:
+          type: string
+          nullable: true
+      example:
+        id: 101
+        employeeId: 5
+        approverId: 3
+        leaveTypeId: 1
+        startDate: "2026-10-29"
+        endDate: "2026-11-03"
+        workingDays: 4
+        notes: Family trip
+        status: PENDING
+        submittedAt: "2026-10-22T09:15:00Z"
+        decidedAt: null
+        decisionComment: null
+
+    ApprovalDetail:
+      description: >
+        A pending request plus everything FR11's "rich request context"
+        calls for — employee, dates, type, balance, recent history — and the
+        comment thread (FR15), so the approver sees the full picture in one
+        call instead of following up with GET /requests/{id}, .../history
+        and .../comments separately.
+      allOf:
+        - $ref: '#/components/schemas/LeaveRequest'
+        - type: object
+          properties:
+            employeeUsername:
+              type: string
+              description: Display name for the requester (users table has no separate "full name" field)
+            leaveTypeName:
+              type: string
+              description: From leave_types.name, e.g. Vacation, Sick, Parental, Sabbatical
+            balance:
+              allOf:
+                - $ref: '#/components/schemas/Balance'
+              description: Employee's current balance for this leave type, as of right now (FR6, FR11)
+            comments:
+              type: array
+              description: Full comment thread on the request, oldest first (FR15)
+              items:
+                $ref: '#/components/schemas/Comment'
+            history:
+              type: array
+              description: Recent History timeline — submit, edits, comments — up to this pending decision (FR11, FR45)
+              items:
+                $ref: '#/components/schemas/HistoryEntry'
+      example:
+        id: 101
+        employeeId: 5
+        approverId: 3
+        leaveTypeId: 1
+        startDate: "2026-10-30"
+        endDate: "2026-11-03"
+        workingDays: 3
+        notes: Trip shortened by a day
+        status: PENDING
+        submittedAt: "2026-10-22T09:15:00Z"
+        decidedAt: null
+        decisionComment: null
+        employeeUsername: emp.jsmith
+        leaveTypeName: Vacation
+        balance:
+          userId: 5
+          leaveTypeId: 1
+          totalDays: 20
+          reservedDays: 3
+          availableDays: 17
+        comments:
+          - id: 44
+            requestId: 101
+            authorId: 3
+            body: Can you cover the Tuesday handover before you leave?
+            createdAt: "2026-10-22T13:40:00Z"
+          - id: 45
+            requestId: 101
+            authorId: 5
+            body: Yes, I'll hand off to Priya before I go.
+            createdAt: "2026-10-22T14:05:00Z"
+        history:
+          - type: SUBMITTED
+            actorId: 5
+            occurredAt: "2026-10-22T09:15:00Z"
+            detail: Submitted Vacation, 2026-10-29 to 2026-11-03 (4 working days)
+          - type: EDITED
+            actorId: 5
+            occurredAt: "2026-10-22T10:02:00Z"
+            detail: Changed to 2026-10-30 to 2026-11-03 (3 working days)
+          - type: COMMENT
+            actorId: 3
+            occurredAt: "2026-10-22T13:40:00Z"
+            detail: Can you cover the Tuesday handover before you leave?
+          - type: COMMENT
+            actorId: 5
+            occurredAt: "2026-10-22T14:05:00Z"
+            detail: Yes, I'll hand off to Priya before I go.
+
+    Comment:
+      type: object
+      description: request_comments table (FR15)
+      properties:
+        id:
+          type: integer
+          format: int64
+        requestId:
+          type: integer
+          format: int64
+        authorId:
+          type: integer
+          format: int64
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      example:
+        id: 44
+        requestId: 101
+        authorId: 3
+        body: Can you cover the Tuesday handover before you leave?
+        createdAt: "2026-10-22T13:40:00Z"
+
+    CommentCreate:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+      example:
+        body: Can you cover the Tuesday handover before you leave?
+
+    HistoryEntry:
+      type: object
+      description: One row of the request History tab timeline (FR45)
+      properties:
+        type:
+          $ref: '#/components/schemas/HistoryEntryType'
+        actorId:
+          type: integer
+          format: int64
+        occurredAt:
+          type: string
+          format: date-time
+        detail:
+          type: string
+          description: Free-text summary, e.g. the comment body or the decision comment
+      example:
+        type: APPROVED
+        actorId: 3
+        occurredAt: "2026-10-23T08:50:00Z"
+        detail: Enjoy your trip!
+
+    DecisionRequest:
+      type: object
+      description: >
+        Body for approve/reject. comment is optional on approve, required
+        and non-blank on reject (FR12, FR13).
+      properties:
+        comment:
+          type: string
+          nullable: true
+      example:
+        comment: Enjoy your trip!
+
+    TeamLeaveEntry:
+      type: object
+      description: >
+        One row of the team leave calendar (FR14), expanded with the
+        request's full comment thread (FR15) and History timeline (FR45) so
+        a manager or HR can see everything — the leave itself, every comment
+        exchanged between employee/manager/HR, and when each change
+        happened — without a second call per request.
+      properties:
+        requestId:
+          type: integer
+          format: int64
+        employeeId:
+          type: integer
+          format: int64
+        leaveTypeId:
+          type: integer
+          format: int64
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        workingDays:
+          type: integer
+        status:
+          $ref: '#/components/schemas/RequestStatus'
+          description: Always APPROVED for this endpoint (FR14 scopes it to approved leave)
+        comments:
+          type: array
+          description: Full comment thread on the request, oldest first (FR15)
+          items:
+            $ref: '#/components/schemas/Comment'
+        history:
+          type: array
+          description: Request History timeline — submit, edits, comments, decision, in order (FR45)
+          items:
+            $ref: '#/components/schemas/HistoryEntry'
+      example:
+        requestId: 97
+        employeeId: 5
+        leaveTypeId: 1
+        startDate: "2026-08-10"
+        endDate: "2026-08-11"
+        workingDays: 2
+        status: APPROVED
+        comments:
+          - id: 44
+            requestId: 97
+            authorId: 3
+            body: Can you cover the Tuesday handover before you leave?
+            createdAt: "2026-08-03T13:40:00Z"
+          - id: 45
+            requestId: 97
+            authorId: 5
+            body: Yes, I'll hand off to Priya before I go.
+            createdAt: "2026-08-03T14:05:00Z"
+        history:
+          - type: SUBMITTED
+            actorId: 5
+            occurredAt: "2026-08-03T09:15:00Z"
+            detail: Submitted Vacation, 2026-08-10 to 2026-08-11 (2 working days)
+          - type: COMMENT
+            actorId: 3
+            occurredAt: "2026-08-03T13:40:00Z"
+            detail: Can you cover the Tuesday handover before you leave?
+          - type: COMMENT
+            actorId: 5
+            occurredAt: "2026-08-03T14:05:00Z"
+            detail: Yes, I'll hand off to Priya before I go.
+          - type: APPROVED
+            actorId: 3
+            occurredAt: "2026-08-04T09:05:00Z"
+            detail: Approved, enjoy
+
+    # ---- balances --------------------------------------------------------
+    Balance:
+      type: object
+      description: leave_balances table; available = total - reserved (FR6, FR31)
+      properties:
+        userId:
+          type: integer
+          format: int64
+        leaveTypeId:
+          type: integer
+          format: int64
+        totalDays:
+          type: integer
+        reservedDays:
+          type: integer
+        availableDays:
+          type: integer
+          description: Computed as totalDays - reservedDays, never negative
+      example:
+        userId: 5
+        leaveTypeId: 1
+        totalDays: 20
+        reservedDays: 4
+        availableDays: 16
+
+    BalanceSet:
+      type: object
+      required: [totalDays, reason]
+      properties:
+        totalDays:
+          type: integer
+          minimum: 0
+        reason:
+          type: string
+      example:
+        totalDays: 20
+        reason: Annual Vacation allotment for 2027
+
+    BalanceAdjust:
+      type: object
+      required: [changeDays, reason]
+      properties:
+        changeDays:
+          type: integer
+          description: Signed; positive adds days, negative removes days
+        reason:
+          type: string
+      example:
+        changeDays: 2
+        reason: Carryover correction after manual review
+
+    BalanceLedgerEntry:
+      type: object
+      description: balance_ledger table (FR30)
+      properties:
+        id:
+          type: integer
+          format: int64
+        userId:
+          type: integer
+          format: int64
+        leaveTypeId:
+          type: integer
+          format: int64
+        changeDays:
+          type: integer
+        kind:
+          $ref: '#/components/schemas/LedgerKind'
+        reason:
+          type: string
+        actorId:
+          type: integer
+          format: int64
+        requestId:
+          type: integer
+          format: int64
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      example:
+        id: 501
+        userId: 5
+        leaveTypeId: 1
+        changeDays: 2
+        kind: ADJUST
+        reason: Carryover correction after manual review
+        actorId: 1
+        requestId: null
+        createdAt: "2026-10-22T16:00:00Z"
+
+    # ---- notifications -----------------------------------------------
+    Notification:
+      type: object
+      description: >
+        notifications table (FR50-FR54). sentAt records when
+        sendNotification() wrote this row and printed its log line — no
+        real email was sent in this POC.
+      properties:
+        id:
+          type: integer
+          format: int64
+        userId:
+          type: integer
+          format: int64
+        requestId:
+          type: integer
+          format: int64
+        kind:
+          $ref: '#/components/schemas/NotificationKind'
+        subject:
+          type: string
+        sentAt:
+          type: string
+          format: date-time
+      example:
+        id: 231
+        userId: 5
+        requestId: 101
+        kind: APPROVED
+        subject: "Your Vacation request (2026-10-30 to 2026-11-03) was approved"
+        sentAt: "2026-10-23T08:50:01Z"
+
+    # ---- audit -------------------------------------------------------
+    AuditRequestReport:
+      description: >
+        What GET /audit actually returns: one row per leave request, any
+        status, with its full comment thread (FR15) and full History
+        timeline (FR45) nested inside — built by joining audit_events,
+        request_comments and leave_requests for that request. This is the
+        "all details for each request" view; AuditEvent below is the raw
+        underlying row shape it's assembled from, kept here for reference.
+      type: object
+      properties:
+        requestId:
+          type: integer
+          format: int64
+        employeeId:
+          type: integer
+          format: int64
+        employeeUsername:
+          type: string
+        leaveTypeId:
+          type: integer
+          format: int64
+        leaveTypeName:
+          type: string
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        workingDays:
+          type: integer
+        status:
+          $ref: '#/components/schemas/RequestStatus'
+          description: Any status — PENDING, APPROVED, REJECTED or CANCELLED (unlike /team/leave, which is approved-only)
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Comment'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryEntry'
+      example:
+        requestId: 97
+        employeeId: 5
+        employeeUsername: emp.jsmith
+        leaveTypeId: 1
+        leaveTypeName: Vacation
+        startDate: "2026-08-10"
+        endDate: "2026-08-11"
+        workingDays: 2
+        status: APPROVED
+        comments:
+          - id: 44
+            requestId: 97
+            authorId: 3
+            body: Can you cover the Tuesday handover before you leave?
+            createdAt: "2026-08-03T13:40:00Z"
+          - id: 45
+            requestId: 97
+            authorId: 5
+            body: Yes, I'll hand off to Priya before I go.
+            createdAt: "2026-08-03T14:05:00Z"
+        history:
+          - type: SUBMITTED
+            actorId: 5
+            occurredAt: "2026-08-03T09:15:00Z"
+            detail: Submitted Vacation, 2026-08-10 to 2026-08-11 (2 working days)
+          - type: COMMENT
+            actorId: 3
+            occurredAt: "2026-08-03T13:40:00Z"
+            detail: Can you cover the Tuesday handover before you leave?
+          - type: COMMENT
+            actorId: 5
+            occurredAt: "2026-08-03T14:05:00Z"
+            detail: Yes, I'll hand off to Priya before I go.
+          - type: APPROVED
+            actorId: 3
+            occurredAt: "2026-08-04T09:05:00Z"
+            detail: Approved, enjoy
+
+    AuditEvent:
+      type: object
+      description: >
+        Not referenced by any path below — kept as the raw audit_events
+        table shape (FR42-FR44) that AuditRequestReport above is assembled
+        from. Comments are audit events too (action REQUEST_COMMENT_ADDED,
+        entity REQUEST_COMMENT) so "what action, by whom, when" includes the
+        discussion thread, not just decisions. actorUsername is a display
+        join on actorId, added so HR doesn't have to resolve ids by hand.
+      properties:
+        id:
+          type: integer
+          format: int64
+        entity:
+          type: string
+          description: e.g. LEAVE_REQUEST, USER, BALANCE, REQUEST_COMMENT
+        entityId:
+          type: integer
+          format: int64
+        action:
+          type: string
+          description: >
+            Action code, e.g. LEAVE_REQUEST_SUBMITTED, LEAVE_REQUEST_APPROVED,
+            LEAVE_REQUEST_REJECTED, REQUEST_COMMENT_ADDED, USER_CREATED,
+            LEAVE_BALANCE_SET, LEAVE_BALANCE_ADJUSTED
+        actorId:
+          type: integer
+          format: int64
+        actorUsername:
+          type: string
+          description: Display join on actorId — who performed this action
+        detailsJson:
+          type: object
+          additionalProperties: true
+          description: >
+            Action-specific payload. For REQUEST_COMMENT_ADDED this includes
+            requestId and the comment body, so the comment text itself shows
+            up in the audit trail alongside its timestamp and author.
+        createdAt:
+          type: string
+          format: date-time
+      example:
+        id: 1050
+        entity: REQUEST_COMMENT
+        entityId: 101
+        action: REQUEST_COMMENT_ADDED
+        actorId: 5
+        actorUsername: emp.jsmith
+        detailsJson:
+          requestId: 101
+          comment: Yes, I'll hand off to Priya before I go.
+        createdAt: "2026-10-22T14:05:00Z"
+
+    # ---- errors --------------------------------------------------------
+    ProblemDetail:
+      type: object
+      description: >
+        RFC 9457 problem response used for every non-2xx response. Not
+        explicit in the PRD; added here so every error path in this spec has
+        one consistent shape.
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri
+        code:
+          type: string
+          description: Machine-readable error code, e.g. INSUFFICIENT_BALANCE, INVALID_TRANSITION
+      example:
+        type: about:blank
+        title: Insufficient balance
+        status: 409
+        detail: Requested 4 working days of Vacation but only 2 days are available.
+        instance: /api/requests
+        code: INSUFFICIENT_BALANCE
