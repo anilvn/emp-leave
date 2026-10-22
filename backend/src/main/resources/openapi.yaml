@@ -14,6 +14,14 @@ info:
     managers, 8 employees) and the PRD's own worked example from acceptance
     scenario 1 (Thu 2026-10-29 to Tue 2026-11-03 = 4 working days).
 
+    Applies to every operation below except POST /auth/login,
+    POST /auth/logout and POST /auth/change-password: while the
+    authenticated user's `mustChangePassword` is true, the call is refused
+    with 403 PASSWORD_CHANGE_REQUIRED (see the PasswordChangeRequired
+    response component). This is how FR20's "must change on login" is
+    enforced — a temporary password gets the user in and no further, until
+    they replace it.
+
     Notes carried over from the PRD:
     - Notifications (FR50-FR54): `sendNotification()` writes a `notifications`
       row and prints a log line. It does not call a mail server. Real SMTP
@@ -345,6 +353,14 @@ paths:
         all shown and editable — but recalculates only the working-day
         reservation and logs the change (FR7). leaveTypeId is echoed back
         unchanged; the server rejects an actual change of leave type.
+
+        Re-reservation excludes this request's own currently-held days: the
+        new working-day count is compared against
+        `availableDays + thisRequest.workingDays`, so lengthening a 4-day
+        request to 5 days needs one more day free, not five. An edit that
+        would still exceed the balance is refused with 409
+        INSUFFICIENT_BALANCE and leaves the existing reservation untouched
+        (FR31 — a balance can never go negative, on edit as on submit).
       x-functional-requirements: [FR7, FR9]
       requestBody:
         required: true
@@ -421,13 +437,25 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetail'
-              example:
-                type: about:blank
-                title: Invalid transition
-                status: 409
-                detail: Request 101 is APPROVED and can no longer be edited.
-                instance: /api/requests/101
-                code: INVALID_TRANSITION
+              examples:
+                invalidTransition:
+                  summary: Request is no longer PENDING
+                  value:
+                    type: about:blank
+                    title: Invalid transition
+                    status: 409
+                    detail: Request 101 is APPROVED and can no longer be edited.
+                    instance: /api/requests/101
+                    code: INVALID_TRANSITION
+                insufficientBalance:
+                  summary: Lengthened range exceeds available balance (FR31)
+                  value:
+                    type: about:blank
+                    title: Insufficient balance
+                    status: 409
+                    detail: Edit would reserve 8 working days of Vacation but only 6 are available to this request (4 already held by it, 2 otherwise free). The existing reservation is unchanged.
+                    instance: /api/requests/101
+                    code: INSUFFICIENT_BALANCE
 
   /requests/{requestId}/cancel:
     parameters:
@@ -1565,6 +1593,23 @@ components:
             status: 403
             detail: You do not have permission to access this resource.
             code: ACCESS_DENIED
+    PasswordChangeRequired:
+      description: >
+        Caller is authenticated but holds a temporary password
+        (`mustChangePassword` true) and must replace it via
+        POST /auth/change-password before using any other endpoint (FR20).
+        Applies to every operation except login, logout and
+        change-password itself.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            type: about:blank
+            title: Password change required
+            status: 403
+            detail: Your temporary password must be changed before you can use this resource.
+            code: PASSWORD_CHANGE_REQUIRED
     NotFound:
       description: No such resource
       content:
@@ -2376,7 +2421,23 @@ components:
           format: uri
         code:
           type: string
-          description: Machine-readable error code, e.g. INSUFFICIENT_BALANCE, INVALID_TRANSITION
+          description: >
+            Machine-readable error code, drawn from one canonical enum
+            (AD-11). The full set used by this contract: ACCESS_DENIED,
+            VALIDATION_FAILED, INVALID_TRANSITION, INSUFFICIENT_BALANCE,
+            NOT_FOUND, INVALID_CREDENTIALS, LEAVE_TYPE_CHANGE_NOT_ALLOWED,
+            COMMENT_REQUIRED, ACCOUNT_LOCKED, PASSWORD_CHANGE_REQUIRED.
+          enum:
+            - ACCESS_DENIED
+            - VALIDATION_FAILED
+            - INVALID_TRANSITION
+            - INSUFFICIENT_BALANCE
+            - NOT_FOUND
+            - INVALID_CREDENTIALS
+            - LEAVE_TYPE_CHANGE_NOT_ALLOWED
+            - COMMENT_REQUIRED
+            - ACCOUNT_LOCKED
+            - PASSWORD_CHANGE_REQUIRED
       example:
         type: about:blank
         title: Insufficient balance
