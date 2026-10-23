@@ -1,0 +1,5 @@
+A leave request for {{leaveType}} is {{status}}.
+Dates: {{startDate}} to {{endDate}}
+Working days: {{workingDays}}
+Status: {{status}}
+View request: {{requestLink}}

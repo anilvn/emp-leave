@@ -4,7 +4,7 @@
 
 ## Goal
 
-An employee can run their own leave end to end without chasing anyone. They submit a request against a real balance, see it counted in working days, watch its status, edit or cancel it while pending, read a History timeline, and see their notification log — while their manager gets a notification row the moment it lands. Submissions that exceed available days are refused, and reserved days move correctly on every edit and cancellation.
+Give employees a complete self-service leave flow: understand their available entitlements, submit and track requests, make permitted changes, review what happened, and see their notifications. Requests must be counted consistently and held against real balances so pending leave cannot be overbooked.
 
 ## Stories
 
@@ -18,45 +18,32 @@ An employee can run their own leave end to end without chasing anyone. They subm
 
 ## Requirements & Constraints
 
-**Functional (FR1–FR9, FR31, FR45, FR52–FR54):**
-- Submit a request choosing from Vacation, Sick, Parental, Sabbatical; whole days only.
-- Date range validated: end ≥ start; days counted as working days Mon–Fri, public holidays ignored.
-- Optional free-text notes on create and update.
-- Status lifecycle: Pending → Approved/Rejected/Cancelled. Cancelled requests stay visible, never deleted.
-- Employee views only their own requests; filterable by status.
-- Balance per type shows total, reserved (pending) and available days; available = total − reserved, never negative.
-- Edit allowed only while Pending; re-reservation recalculated. Leave-type change refused (400 `LEAVE_TYPE_CHANGE_NOT_ALLOWED`).
-- Submission/edit refused with 409 `INSUFFICIENT_BALANCE` when working days exceed available.
-- On edit, re-reservation excludes the request's own currently-held days.
-- Every request records employee id, submission timestamp, and an audit event.
-- History timeline per request: chronological entries derived from audit_events.
-- On submit, `sendNotification()` writes a `notifications` row to the manager and prints a log line (no mail server).
-- Notification history scoped to the caller's own rows.
-- Email template renders leave type, dates, day count, status and a link; reused by Epic 3.
-
-**Non-functional:**
-- Schema managed by Flyway; schema and seed migrations are separate files (seed data added incrementally per epic).
-- Integration tests run against real PostgreSQL via Testcontainers.
-- All timestamps `timestamptz`, JVM pinned to UTC; `start_date`/`end_date` are `DATE`; leave amounts are whole-day integers.
-- Surrogate keys `BIGINT GENERATED ALWAYS AS IDENTITY`.
-- All errors are RFC 9457 `ProblemDetail` from one `@RestControllerAdvice` with `common.ErrorCode`.
-
-**Demo scenarios this epic must close:** 1 (submit Thu–Tue = 4 days), 2 (edit then cancel), 9 (employee opens another's request → 403 + logged), 10 (exceeds available days).
+- Requests use the Vacation, Sick, Parental, and Sabbatical leave types, whole days, a start/end date, and optional notes. Reject reversed date ranges and ranges with no working days. Count Monday–Friday inclusively; public holidays are not excluded.
+- Employees can view their own requests and statuses, filter their request list, and read each request's chronological history. Only pending requests can be edited or cancelled. A cancelled request remains visible.
+- Request details and history are visible to the employee, their direct manager, or HR; enforce this shared access policy and log denied access.
+- Show each leave type's total, reserved, and available days. Available days are total minus reserved and must never be negative; a missing balance is shown as zero. Refuse submissions or edits that exceed available days, including days held by other pending requests.
+- Reserve days on submission, recalculate the reservation on edit, and release it on cancellation. Record the action, actor, and time in the request history.
+- On submission, create a notification row for the request's approver and support each user's own notification history. Render notification content with leave type, dates, working-day count, status, and request link. This POC logs notifications to the database and application log; it does not send email. Notification failure must not undo a committed request or reservation.
+- Use Flyway-managed PostgreSQL schema migrations and separate, incremental seed migrations. Keep date ranges as `DATE` values and leave-day amounts as whole-day integers. Exercise database-backed behavior with PostgreSQL integration tests.
 
 ## Technical Decisions
 
-- **Table ownership (AD-2):** `leave_types` → `leave`; `leave_requests`, `request_comments` → `leave`; `leave_balances`, `balance_ledger` → `balances`; `notifications` → `notifications`. Each module's entities/repositories are package-private.
-- **Balance invariant (AD-5):** `BalanceService` is the sole writer of `leave_balances`/`balance_ledger`. A `CHECK (total_days - reserved_days >= 0)` on `leave_balances` as defence in depth.
-- **Audit writes (AD-4):** The module owning the mutated table writes its own audit/ledger row inside its `@Transactional` method. Actor id passed explicitly, never re-derived from `SecurityContext`. Neither module duplicates the other's row.
-- **Working-day calculator (AD-3):** Stateless utility in `common`; no entity, repository or business-rule service beside it.
-- **Access control (AD-10):** All role/ownership checks go through `security.AccessPolicy` — `requireOwnerManagerOrHr(...)`, `currentScope()` returning `UserScope`, and `requireRole(...)`. Repository methods take `UserScope` for scoped queries.
-- **Notifications (AD-12):** `NotificationService.sendNotification()` catches all exceptions internally, logs at ERROR, returns normally. Called last, after audit/balance writes. Synchronous, in-process (AD-1).
-- **Dependency edges:** `leave` → `balances`, `audit`, `notifications`, `common`. `notifications` is a leaf (depends only on `common`/`security`).
+- Keep domain code in the layered modular monolith. `leave` owns `leave_types`, `leave_requests`, and request comments; `balances` owns `leave_balances` and `balance_ledger`; `notifications` owns notification rows. Entities and repositories stay within their owning module; cross-module access goes through public service methods.
+- `BalanceService` is the only writer of balances and ledger entries. Enforce the non-negative balance invariant in the service and with a database check constraint. A reservation/release and its ledger entry commit in the same transaction as the triggering request change.
+- Put the stateless working-day calculator in `common`; keep business-rule services and persistence out of that package.
+- The module owning the changed data writes its audit entry within its transaction. Pass the actor id explicitly across module boundaries; do not have a caller duplicate another module's audit or ledger write.
+- Call domain services synchronously in-process; do not introduce an event bus or asynchronous flow. `NotificationService` is a leaf and handles its own failures.
+- Apply ownership and role checks through the shared `AccessPolicy`; keep reads scoped to the authorized user's data. Use the shared RFC 9457 `ProblemDetail` error shape and machine-readable error codes.
+- For the employee UI, use the employee role shell and requests feature area. Follow the frontend architecture's standalone-component and signals-based state conventions; use `httpResource()` for reads and `HttpClient` for mutations.
+
+## UX & Interaction Patterns
+
+- Present balances as per-type totals, reserved days, and available days; offer date pickers, leave-type selection, and optional notes in the request flow.
+- Make request status and pending-only actions clear in the employee's filterable request list. Show history oldest-first as a readable timeline. Present domain-specific errors inline where useful, with a global toast fallback for unhandled errors.
+- Keep forms labelled and keyboard accessible, with a responsive, desktop-first layout.
 
 ## Cross-Story Dependencies
 
-- Epic 1 provides: Flyway infrastructure, `users` table with seeded demo cast (12 users), `audit_events`/`access_log` tables with immutability triggers, `AuditService`, `AccessPolicy`/`UserScope`, `SecurityConfig`/`JwtAuthenticationFilter`, `active_sessions`, `ErrorCode` enum, `ProblemDetail` advice.
-- Story 2.1 (tables + seed) is a prerequisite for all later stories in this epic.
-- Story 2.2 (leave_requests, balance_ledger, working-day calc) is needed before 2.3–2.7.
-- Story 2.3 (notifications table) stands alone after 2.2 but its template is reused by Epic 3.
-- Story 2.7's `HistoryEntryType` enum includes `APPROVED`, `REJECTED`, `COMMENT` — populated by Epic 3.
+- Epic 1 supplies the shared schema, seeded users, audit service, access policy, and error handling that this epic builds on.
+- The leave catalogue and balance records must exist before requests can be checked and reserved. Request submission and its audit/balance writes underpin request notifications, listing, editing, cancellation, and history.
+- The notification template/content established here is reused for approval and rejection notifications in Epic 3. The history model also leaves approval, rejection, and comment event types available for Epic 3.

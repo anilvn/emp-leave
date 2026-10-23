@@ -1,6 +1,7 @@
 package com.company.leave.leave;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,5 +30,10 @@ public class LeaveTypeService {
     @Transactional(readOnly = true)
     public boolean existsById(long leaveTypeId) {
         return leaveTypeRepository.existsById(leaveTypeId);
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<String> findNameById(long leaveTypeId) {
+        return leaveTypeRepository.findById(leaveTypeId).map(LeaveType::getName);
     }
 }

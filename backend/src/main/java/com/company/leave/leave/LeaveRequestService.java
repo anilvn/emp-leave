@@ -7,10 +7,15 @@ import com.company.leave.balances.BalanceService;
 import com.company.leave.common.ApiException;
 import com.company.leave.common.ErrorCode;
 import com.company.leave.common.WorkingDayCalculator;
+import com.company.leave.notifications.NotificationKind;
+import com.company.leave.notifications.NotificationMessage;
+import com.company.leave.notifications.NotificationService;
 import com.company.leave.users.UserService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Orchestrates leave request submission: validates dates, computes working days,
@@ -26,28 +31,31 @@ public class LeaveRequestService {
     private final BalanceService balanceService;
     private final UserService userService;
     private final AuditService auditService;
+    private final NotificationService notificationService;
 
     LeaveRequestService(LeaveRequestRepository leaveRequestRepository,
                         LeaveTypeService leaveTypeService,
                         BalanceService balanceService,
                         UserService userService,
-                        AuditService auditService) {
+                        AuditService auditService,
+                        NotificationService notificationService) {
         this.leaveRequestRepository = leaveRequestRepository;
         this.leaveTypeService = leaveTypeService;
         this.balanceService = balanceService;
         this.userService = userService;
         this.auditService = auditService;
+        this.notificationService = notificationService;
     }
 
     @Transactional
     public LeaveRequestResponse submit(LeaveRequestCreateRequest request, long actorId) {
         // 1. Validate leave type
-        if (!leaveTypeService.existsById(request.getLeaveTypeId())) {
-            throw new ApiException(
-                    HttpStatus.BAD_REQUEST,
-                    ErrorCode.VALIDATION_FAILED,
-                    "leaveTypeId " + request.getLeaveTypeId() + " does not refer to an existing leave type.");
-        }
+        String leaveTypeName = leaveTypeService.findNameById(request.getLeaveTypeId())
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.BAD_REQUEST,
+                        ErrorCode.VALIDATION_FAILED,
+                        "leaveTypeId " + request.getLeaveTypeId()
+                                + " does not refer to an existing leave type."));
 
         // 2. Validate dates
         if (request.getEndDate().isBefore(request.getStartDate())) {
@@ -89,6 +97,22 @@ public class LeaveRequestService {
 
         // 7. Audit
         auditService.recordEvent("LEAVE_REQUEST", leaveRequest.getId(), "LEAVE_REQUEST_SUBMITTED", actorId, null);
+
+        NotificationMessage notification = new NotificationMessage(
+                approverId,
+                leaveRequest.getId(),
+                NotificationKind.SUBMITTED,
+                leaveTypeName,
+                leaveRequest.getStartDate(),
+                leaveRequest.getEndDate(),
+                leaveRequest.getWorkingDays(),
+                leaveRequest.getStatus().name());
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                notificationService.sendNotification(notification);
+            }
+        });
 
         return toResponse(leaveRequest);
     }

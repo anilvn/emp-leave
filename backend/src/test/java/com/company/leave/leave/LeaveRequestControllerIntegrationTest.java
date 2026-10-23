@@ -6,8 +6,11 @@ import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
@@ -23,6 +26,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -30,6 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @Testcontainers
 @SpringBootTest
+@ExtendWith(OutputCaptureExtension.class)
 class LeaveRequestControllerIntegrationTest {
 
     @Container
@@ -51,19 +56,21 @@ class LeaveRequestControllerIntegrationTest {
     @BeforeEach
     void setUp() {
         jdbcTemplate = new JdbcTemplate(dataSource);
+        dropNotificationFailureTrigger();
         jdbcTemplate.update("delete from active_sessions");
-        jdbcTemplate.update("update users set must_change_password = false where id = ?", EMPLOYEE_ID);
+        jdbcTemplate.update(
+                "update users set must_change_password = false where id in (?, ?)", EMPLOYEE_ID, MANAGER_ID);
     }
 
     @AfterEach
     void cleanUp() {
-        // Remove test data created by the tests. balance_ledger references
-        // leave_requests, so delete it first. audit_events is immutable (trigger
-        // prevents DELETE), so we leave those rows in place and verify audit counts
-        // within each test instead.
+        dropNotificationFailureTrigger();
+        // Notification and balance-ledger rows reference requests, so delete them first.
+        jdbcTemplate.update("delete from notifications");
         jdbcTemplate.update("delete from balance_ledger");
         jdbcTemplate.update("delete from leave_requests");
-        jdbcTemplate.update("update users set must_change_password = false where id = ?", EMPLOYEE_ID);
+        jdbcTemplate.update(
+                "update users set must_change_password = false where id in (?, ?)", EMPLOYEE_ID, MANAGER_ID);
         jdbcTemplate.update("""
                 insert into leave_balances (user_id, leave_type_id, total_days, reserved_days)
                 select users.id,
@@ -84,7 +91,7 @@ class LeaveRequestControllerIntegrationTest {
     }
 
     @Test
-    void happyPath_thuToTue_creates4WorkingDaysRequest() throws Exception {
+    void happyPath_thuToTue_creates4WorkingDaysRequest(CapturedOutput output) throws Exception {
         long vacationTypeId = leaveTypeId("Vacation");
 
         MvcResult result = mockMvc.perform(post("/requests")
@@ -131,6 +138,97 @@ class LeaveRequestControllerIntegrationTest {
                 "select count(*) from audit_events where entity = 'LEAVE_REQUEST' and action = 'LEAVE_REQUEST_SUBMITTED' and entity_id = ?",
                 Integer.class, requestId);
         assertThat(auditCount).isEqualTo(1);
+
+        Integer notificationCount = jdbcTemplate.queryForObject(
+                "select count(*) from notifications where user_id = ? and request_id = ? and kind = 'SUBMITTED'",
+                Integer.class, MANAGER_ID, requestId);
+        assertThat(notificationCount).isEqualTo(1);
+        String subject = jdbcTemplate.queryForObject(
+                "select subject from notifications where user_id = ? and request_id = ?",
+                String.class, MANAGER_ID, requestId);
+        assertThat(subject).contains("Vacation", "2026-10-29", "2026-11-03", "PENDING");
+        assertThat(output.getAll())
+                .contains("Notification for user " + MANAGER_ID, "Working days: 4", "/requests/" + requestId);
+    }
+
+    @Test
+    void notificationHistory_returnsOnlyTheAuthenticatedUsersRows() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        MvcResult result = mockMvc.perform(post("/requests")
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "leaveTypeId": %d,
+                                    "startDate": "2026-10-29",
+                                    "endDate": "2026-11-03"
+                                }
+                                """.formatted(vacationTypeId)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        long requestId = ((Number) JsonPath.read(result.getResponse().getContentAsString(), "$.id")).longValue();
+
+        jdbcTemplate.update(
+                "insert into notifications (user_id, request_id, kind, subject, sent_at) values (?, ?, 'SUBMITTED', ?, now())",
+                EMPLOYEE_ID, requestId, "Employee-only notification");
+
+        mockMvc.perform(get("/notifications").with(authenticatedAs(MANAGER_ID, "MANAGER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].userId").value((int) MANAGER_ID))
+                .andExpect(jsonPath("$[0].requestId").value((int) requestId))
+                .andExpect(jsonPath("$[0].kind").value("SUBMITTED"))
+                .andExpect(jsonPath("$[0].subject").isNotEmpty())
+                .andExpect(jsonPath("$[0].sentAt").isNotEmpty());
+    }
+
+    @Test
+    void notificationHistory_requiresAuthentication() throws Exception {
+        mockMvc.perform(get("/notifications"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void notificationWriteFailure_doesNotRollbackSubmittedRequest(CapturedOutput output) throws Exception {
+        jdbcTemplate.execute("""
+                create or replace function reject_test_notification() returns trigger as $$
+                begin
+                    raise exception 'intentional notification failure';
+                end;
+                $$ language plpgsql
+                """);
+        jdbcTemplate.execute("""
+                create trigger reject_test_notification
+                before insert on notifications
+                for each row execute function reject_test_notification()
+                """);
+
+        long vacationTypeId = leaveTypeId("Vacation");
+        MvcResult result = mockMvc.perform(post("/requests")
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "leaveTypeId": %d,
+                                    "startDate": "2026-10-29",
+                                    "endDate": "2026-11-03"
+                                }
+                                """.formatted(vacationTypeId)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        long requestId = ((Number) JsonPath.read(result.getResponse().getContentAsString(), "$.id")).longValue();
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from leave_requests where id = ?", Integer.class, requestId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(4);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from audit_events where entity_id = ? and action = 'LEAVE_REQUEST_SUBMITTED'",
+                Integer.class, requestId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from notifications where request_id = ?", Integer.class, requestId)).isZero();
+        assertThat(output.getAll()).contains("Unable to record notification", "intentional notification failure");
     }
 
     @Test
@@ -397,6 +495,11 @@ class LeaveRequestControllerIntegrationTest {
 
     private long leaveTypeId(String name) {
         return jdbcTemplate.queryForObject("select id from leave_types where name = ?", Long.class, name);
+    }
+
+    private void dropNotificationFailureTrigger() {
+        jdbcTemplate.execute("drop trigger if exists reject_test_notification on notifications");
+        jdbcTemplate.execute("drop function if exists reject_test_notification()");
     }
 
     private RequestPostProcessor authenticatedAs(long userId, String role) {

@@ -1402,6 +1402,10 @@ paths:
                   kind: APPROVED
                   subject: "Your Vacation request (2026-10-30 to 2026-11-03) was approved"
                   sentAt: "2026-10-23T08:50:01Z"
+        '401':
+          description: No valid access_token cookie
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   # --------------------------------------------------------------- Audit
   /audit:

@@ -33,6 +33,10 @@ public class AccessPolicy {
         };
     }
 
+    public long currentUserId() {
+        return currentCaller().userId();
+    }
+
     public void requireRole(Role... allowedRoles) {
         Caller caller = currentCaller();
         if (allowedRoles == null) {
