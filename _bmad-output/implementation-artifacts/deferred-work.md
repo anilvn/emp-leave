@@ -21,3 +21,11 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-5-one-permission-layer-for-every-endpoint.md`
   summary: Define the client-visible and transactional behavior when access-log persistence fails after an API operation has run.
   evidence: `AccessLogFilter` writes the audit row after the request chain and propagates write failures, but no fault-injection integration test establishes whether a completed state change remains committed or what response the client receives. Test a state-changing request with a forced audit-write failure to determine whether a mutation can succeed while the caller sees an error and may retry.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-6-hr-creates-accounts-with-a-role-and-a-manager.md`
+  summary: The documented `POST /users` 403 example body (`"Only HR can create user accounts."` in `openapi.yaml`) doesn't match the actual generic `"Access is denied"` produced by `GlobalExceptionHandler.handleAccessDenied`.
+  evidence: Pre-existing: this is the same centralized, single-message `AccessDeniedException` handling established in Story 1.5 and reused exactly as Story 1.6's spec instructed ("mirroring `AuthController.logout`"); not introduced by Story 1.6. Fixing it would mean either giving `AccessPolicy`/`GlobalExceptionHandler` a way to carry per-endpoint detail text, or updating every contract example to the generic message — a cross-cutting AD-11 decision, not a local fix.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-6-hr-creates-accounts-with-a-role-and-a-manager.md`
+  summary: `UserCreateRequest`'s Lombok `@Value` has no `toString` exclusion on `temporaryPassword`, so a future logging/debug statement on the request object would print the plaintext password.
+  evidence: Pre-existing: `LoginRequest` (password field, no `toString` exclusion) has had the identical characteristic since an earlier story; Story 1.6's spec explicitly directed mirroring that exact convention. A fix (e.g. `@ToString.Exclude` or a custom `toString()`) should be applied codebase-wide to every password-carrying DTO, not just the newest one.

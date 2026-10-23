@@ -1,6 +1,8 @@
 package com.company.leave.users;
 
 import jakarta.persistence.LockModeType;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.Lock;
@@ -14,4 +16,10 @@ interface UserRepository extends Repository<User, Long> {
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<User> findByUsername(String username);
+
+    boolean existsByUsername(String username);
+
+    List<User> findAll();
+
+    List<User> findByRoleIn(Collection<Role> roles);
 }

@@ -1,0 +1,246 @@
+package com.company.leave.users;
+
+import javax.sql.DataSource;
+
+import java.util.List;
+
+import org.hamcrest.Matchers;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.TestingAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+@Testcontainers
+class UserControllerIntegrationTest {
+
+    @Container
+    @ServiceConnection
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
+
+    private static final long HR_ADMIN_ID = 1L;
+    private static final long MANAGER_ID = 2L;
+    private static final long EMPLOYEE_ID = 5L;
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private DataSource dataSource;
+
+    private JdbcTemplate jdbcTemplate;
+
+    @BeforeEach
+    void setUp() {
+        jdbcTemplate = new JdbcTemplate(dataSource);
+    }
+
+    @Test
+    void hrCreatesEmployeeReturns201WithAuditEventAndNoPlaintextPasswordInResponse() throws Exception {
+        String body = """
+                {"username":"new.emp.one","role":"EMPLOYEE","managerId":3,"temporaryPassword":"Temp#2026"}
+                """;
+
+        MvcResult result = mockMvc.perform(post("/users")
+                        .with(authenticatedAs(HR_ADMIN_ID, "HR_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.username").value("new.emp.one"))
+                .andExpect(jsonPath("$.role").value("EMPLOYEE"))
+                .andExpect(jsonPath("$.managerId").value(3))
+                .andExpect(jsonPath("$.mustChangePassword").value(true))
+                .andExpect(jsonPath("$.active").value(true))
+                .andReturn();
+
+        String responseBody = result.getResponse().getContentAsString();
+        assertThat(responseBody).doesNotContain("Temp#2026").doesNotContain("temporaryPassword");
+
+        Long createdId = jdbcTemplate.queryForObject(
+                "select id from users where username = ?", Long.class, "new.emp.one");
+        String passwordHash = jdbcTemplate.queryForObject(
+                "select password_hash from users where id = ?", String.class, createdId);
+        assertThat(passwordHash).isNotEqualTo("Temp#2026").startsWith("$2");
+
+        assertThat(jdbcTemplate.queryForObject(
+                        "select count(*) from audit_events where entity = 'USER' and action = 'CREATE' "
+                                + "and entity_id = ? and actor_id = ? and created_at is not null",
+                        Integer.class,
+                        createdId,
+                        HR_ADMIN_ID))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void hrCreatesHrAdminWithoutManagerIdReturns201WithNullManagerId() throws Exception {
+        String body = """
+                {"username":"new.hr.one","role":"HR_ADMIN","managerId":null,"temporaryPassword":"Temp#2026"}
+                """;
+
+        mockMvc.perform(post("/users")
+                        .with(authenticatedAs(HR_ADMIN_ID, "HR_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.role").value("HR_ADMIN"))
+                .andExpect(jsonPath("$.managerId").value(Matchers.nullValue()));
+    }
+
+    @Test
+    void createEmployeeWithoutManagerIdIsRejected() throws Exception {
+        String body = """
+                {"username":"new.emp.two","role":"EMPLOYEE","managerId":null,"temporaryPassword":"Temp#2026"}
+                """;
+
+        mockMvc.perform(post("/users")
+                        .with(authenticatedAs(HR_ADMIN_ID, "HR_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                        "select count(*) from users where username = ?", Integer.class, "new.emp.two"))
+                .isZero();
+    }
+
+    @Test
+    void managerIdPointingToNonManagerIsRejected() throws Exception {
+        String body = """
+                {"username":"new.emp.three","role":"EMPLOYEE","managerId":5,"temporaryPassword":"Temp#2026"}
+                """;
+
+        mockMvc.perform(post("/users")
+                        .with(authenticatedAs(HR_ADMIN_ID, "HR_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                        "select count(*) from users where username = ?", Integer.class, "new.emp.three"))
+                .isZero();
+    }
+
+    @Test
+    void managerIdPointingToNonexistentUserIsRejected() throws Exception {
+        String body = """
+                {"username":"new.emp.four","role":"EMPLOYEE","managerId":9999,"temporaryPassword":"Temp#2026"}
+                """;
+
+        mockMvc.perform(post("/users")
+                        .with(authenticatedAs(HR_ADMIN_ID, "HR_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                        "select count(*) from users where username = ?", Integer.class, "new.emp.four"))
+                .isZero();
+    }
+
+    @Test
+    void duplicateUsernameIsRejectedAndNoRowIsCreated() throws Exception {
+        int before = jdbcTemplate.queryForObject("select count(*) from users", Integer.class);
+        String body = """
+                {"username":"emp.jsmith","role":"EMPLOYEE","managerId":3,"temporaryPassword":"Temp#2026"}
+                """;
+
+        mockMvc.perform(post("/users")
+                        .with(authenticatedAs(HR_ADMIN_ID, "HR_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        int after = jdbcTemplate.queryForObject("select count(*) from users", Integer.class);
+        assertThat(after).isEqualTo(before);
+    }
+
+    @Test
+    void nonHrCallerIsDeniedOnAllThreeEndpoints() throws Exception {
+        String createBody = """
+                {"username":"blocked.create","role":"EMPLOYEE","managerId":3,"temporaryPassword":"Temp#2026"}
+                """;
+
+        mockMvc.perform(post("/users")
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createBody))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+        mockMvc.perform(post("/users")
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createBody))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        mockMvc.perform(get("/users").with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+        mockMvc.perform(get("/users").with(authenticatedAs(MANAGER_ID, "MANAGER")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        mockMvc.perform(get("/users/managers").with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+        mockMvc.perform(get("/users/managers").with(authenticatedAs(MANAGER_ID, "MANAGER")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                        "select count(*) from users where username = ?", Integer.class, "blocked.create"))
+                .isZero();
+    }
+
+    @Test
+    void listUsersReturnsEveryAccountWithNoScopeFilter() throws Exception {
+        int expectedCount = jdbcTemplate.queryForObject("select count(*) from users", Integer.class);
+
+        mockMvc.perform(get("/users").with(authenticatedAs(HR_ADMIN_ID, "HR_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(expectedCount))
+                .andExpect(jsonPath("$[*].username").value(Matchers.hasItem("hr.admin")))
+                .andExpect(jsonPath("$[*].username").value(Matchers.hasItem("emp.jsmith")));
+    }
+
+    @Test
+    void listManagerOptionsReturnsEveryManagerAndHrAdmin() throws Exception {
+        int expectedCount = jdbcTemplate.queryForObject(
+                "select count(*) from users where role in ('MANAGER', 'HR_ADMIN')", Integer.class);
+
+        mockMvc.perform(get("/users/managers").with(authenticatedAs(HR_ADMIN_ID, "HR_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(expectedCount))
+                .andExpect(jsonPath("$[*].role").value(
+                        Matchers.everyItem(Matchers.isIn(List.of("MANAGER", "HR_ADMIN")))))
+                .andExpect(jsonPath("$[*].username").value(Matchers.hasItem("mgr.chen")));
+    }
+
+    private RequestPostProcessor authenticatedAs(long actorId, String role) {
+        return authentication(new TestingAuthenticationToken(actorId, null, new SimpleGrantedAuthority("ROLE_" + role)));
+    }
+}
