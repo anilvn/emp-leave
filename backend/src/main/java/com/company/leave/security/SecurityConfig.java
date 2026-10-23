@@ -1,5 +1,6 @@
 package com.company.leave.security;
 
+import com.company.leave.audit.AuditService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -24,8 +25,12 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain securityFilterChain(
-            HttpSecurity http, JwtService jwtService, SessionRegistry sessionRegistry) throws Exception {
+            HttpSecurity http,
+            JwtService jwtService,
+            SessionRegistry sessionRegistry,
+            AuditService auditService) throws Exception {
         JwtAuthenticationFilter jwtFilter = new JwtAuthenticationFilter(jwtService, sessionRegistry);
+        AccessLogFilter accessLogFilter = new AccessLogFilter(auditService);
         return http
                 .csrf(csrf -> csrf.disable())
                 .formLogin(form -> form.disable())
@@ -39,6 +44,7 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(accessLogFilter, JwtAuthenticationFilter.class)
                 .build();
     }
 }
