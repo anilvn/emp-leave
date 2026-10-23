@@ -10,6 +10,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
  * Produces the one shared {@code application/problem+json} error envelope that every
@@ -37,7 +38,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({
         MethodArgumentNotValidException.class,
         ConstraintViolationException.class,
-        HttpMessageNotReadableException.class
+        HttpMessageNotReadableException.class,
+        MethodArgumentTypeMismatchException.class
     })
     public ProblemDetail handleValidationFailure(Exception ex) {
         return problemDetail(HttpStatus.BAD_REQUEST, "Validation failed", ErrorCode.VALIDATION_FAILED);

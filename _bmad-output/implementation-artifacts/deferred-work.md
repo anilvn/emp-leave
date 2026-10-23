@@ -33,3 +33,9 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-7-forced-password-change-and-hr-password-reset.md`
   summary: Confirm whether a deactivated (`active=false`) user can still change or have reset their own password through a stale, not-yet-expired session, since nothing in the filter chain re-checks `active` after initial login.
   evidence: Neither `JwtAuthenticationFilter`/`SessionRegistry.touchOrReject` nor the new `changePassword`/`resetPassword` paths check `active` post-login in this diff — if true, every endpoint in the app shares this exposure, not just the two added by Story 1.7, so it is not this story's problem to fix alone. What would settle it: trace whether `active` is enforced anywhere beyond the initial `/auth/login` check.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-4-see-my-requests-and-their-status.md`
+  summary: Correct the access-token cookie headers in the existing Postman leave-submission and notification requests.
+  evidence: Their uncommitted request definitions put the raw token variable in `Cookie` without the required `access_token=` name, so those requests will not authenticate; these user-owned Postman edits were left untouched during Story 2.4.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-4-see-my-requests-and-their-status.md`
+  summary: Correct the Postman request named `my-leave-req-by-id` so it targets leave-request detail rather than the balance endpoint.
+  evidence: The uncommitted request is named as request detail but targets `/balances/me` and also supplies a raw token as its cookie value; it was left untouched as user-owned Postman work.

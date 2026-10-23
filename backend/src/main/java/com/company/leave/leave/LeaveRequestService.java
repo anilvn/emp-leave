@@ -1,6 +1,7 @@
 package com.company.leave.leave;
 
 import java.time.Instant;
+import java.util.List;
 
 import com.company.leave.audit.AuditService;
 import com.company.leave.balances.BalanceService;
@@ -10,6 +11,8 @@ import com.company.leave.common.WorkingDayCalculator;
 import com.company.leave.notifications.NotificationKind;
 import com.company.leave.notifications.NotificationMessage;
 import com.company.leave.notifications.NotificationService;
+import com.company.leave.security.AccessPolicy;
+import com.company.leave.security.UserScope;
 import com.company.leave.users.UserService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -32,19 +35,49 @@ public class LeaveRequestService {
     private final UserService userService;
     private final AuditService auditService;
     private final NotificationService notificationService;
+    private final AccessPolicy accessPolicy;
 
     LeaveRequestService(LeaveRequestRepository leaveRequestRepository,
                         LeaveTypeService leaveTypeService,
                         BalanceService balanceService,
                         UserService userService,
                         AuditService auditService,
-                        NotificationService notificationService) {
+                        NotificationService notificationService,
+                        AccessPolicy accessPolicy) {
         this.leaveRequestRepository = leaveRequestRepository;
         this.leaveTypeService = leaveTypeService;
         this.balanceService = balanceService;
         this.userService = userService;
         this.auditService = auditService;
         this.notificationService = notificationService;
+        this.accessPolicy = accessPolicy;
+    }
+
+    @Transactional(readOnly = true)
+    public List<LeaveRequestResponse> list(RequestStatus status, Long employeeId) {
+        UserScope scope = accessPolicy.currentScope();
+        if (employeeId != null && !(scope instanceof UserScope.HrAll)) {
+            Long employeeManagerId = userService.getManagerId(employeeId);
+            accessPolicy.requireOwnerManagerOrHr(
+                    employeeId, employeeManagerId == null ? employeeId : employeeManagerId);
+        }
+        List<LeaveRequest> requests = status == null && employeeId == null
+                ? leaveRequestRepository.findByScope(scope)
+                : leaveRequestRepository.findByScope(scope, status, employeeId);
+        return requests.stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public LeaveRequestResponse get(long requestId) {
+        LeaveRequest request = leaveRequestRepository.findById(requestId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        ErrorCode.NOT_FOUND,
+                        "Leave request " + requestId + " does not exist."));
+        accessPolicy.requireOwnerManagerOrHr(request.getEmployeeId(), request.getApproverId());
+        return toResponse(request);
     }
 
     @Transactional

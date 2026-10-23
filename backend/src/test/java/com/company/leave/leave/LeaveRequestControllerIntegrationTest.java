@@ -1,5 +1,6 @@
 package com.company.leave.leave;
 
+import java.util.List;
 import javax.sql.DataSource;
 
 import com.jayway.jsonpath.JsonPath;
@@ -149,6 +150,137 @@ class LeaveRequestControllerIntegrationTest {
         assertThat(subject).contains("Vacation", "2026-10-29", "2026-11-03", "PENDING");
         assertThat(output.getAll())
                 .contains("Notification for user " + MANAGER_ID, "Working days: 4", "/requests/" + requestId);
+    }
+
+    @Test
+    void requestList_filtersStatusAndOnlyReturnsEmployeeOwnRows() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long otherEmployeeId = 9L;
+        insertRequest(EMPLOYEE_ID, MANAGER_ID, vacationTypeId, "PENDING");
+        insertRequest(EMPLOYEE_ID, MANAGER_ID, vacationTypeId, "APPROVED");
+        insertRequest(EMPLOYEE_ID, MANAGER_ID, vacationTypeId, "REJECTED");
+        insertRequest(EMPLOYEE_ID, MANAGER_ID, vacationTypeId, "CANCELLED");
+        insertRequest(otherEmployeeId, 4L, vacationTypeId, "PENDING");
+
+        for (String requestStatus : new String[] {"PENDING", "APPROVED", "REJECTED", "CANCELLED"}) {
+            mockMvc.perform(get("/requests")
+                            .param("status", requestStatus)
+                            .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.length()").value(1))
+                    .andExpect(jsonPath("$[0].employeeId").value((int) EMPLOYEE_ID))
+                    .andExpect(jsonPath("$[0].status").value(requestStatus));
+        }
+
+        mockMvc.perform(get("/requests").with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(4));
+    }
+
+    @Test
+    void managerRequestListIncludesOwnAndDirectReportsAndCanFilterReport() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        insertRequest(MANAGER_ID, 1L, vacationTypeId, "PENDING");
+        insertRequest(EMPLOYEE_ID, MANAGER_ID, vacationTypeId, "PENDING");
+        insertRequest(6L, MANAGER_ID, vacationTypeId, "APPROVED");
+        insertRequest(9L, 4L, vacationTypeId, "PENDING");
+
+        MvcResult allVisible = mockMvc.perform(get("/requests")
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER")))
+                .andExpect(status().isOk())
+                .andReturn();
+        List<Integer> visibleEmployeeIds = JsonPath.read(allVisible.getResponse().getContentAsString(), "$[*].employeeId");
+        assertThat(visibleEmployeeIds)
+                .containsExactlyInAnyOrder((int) MANAGER_ID, (int) EMPLOYEE_ID, 6);
+
+        mockMvc.perform(get("/requests")
+                        .param("employeeId", Long.toString(EMPLOYEE_ID))
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].employeeId").value((int) EMPLOYEE_ID));
+
+        mockMvc.perform(get("/requests")
+                        .param("status", "APPROVED")
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].employeeId").value(6))
+                .andExpect(jsonPath("$[0].status").value("APPROVED"));
+    }
+
+    @Test
+    void managerCannotFilterRequestsForAnotherTeamsEmployee() throws Exception {
+        mockMvc.perform(get("/requests")
+                        .param("employeeId", "9")
+                        .with(forwardedApiPrefix())
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from access_log where actor_id = ? and resource = ? and allowed = false",
+                Integer.class, MANAGER_ID, "GET /api/requests")).isEqualTo(1);
+    }
+
+    @Test
+    void hrCanFilterRequestsForAnyEmployee() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        insertRequest(9L, 4L, vacationTypeId, "PENDING");
+
+        mockMvc.perform(get("/requests")
+                        .param("employeeId", "9")
+                        .with(authenticatedAs(1L, "HR_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].employeeId").value(9));
+    }
+
+    @Test
+    void requestDetailIsVisibleToOwnerManagerAndHr() throws Exception {
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, leaveTypeId("Vacation"), "PENDING");
+
+        for (long userId : new long[] {EMPLOYEE_ID, MANAGER_ID, 1L}) {
+            String role = userId == EMPLOYEE_ID ? "EMPLOYEE" : userId == MANAGER_ID ? "MANAGER" : "HR_ADMIN";
+            mockMvc.perform(get("/requests/{requestId}", requestId)
+                            .with(authenticatedAs(userId, role)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.id").value((int) requestId))
+                    .andExpect(jsonPath("$.employeeId").value((int) EMPLOYEE_ID))
+                    .andExpect(jsonPath("$.status").value("PENDING"));
+        }
+    }
+
+    @Test
+    void employeeCannotReadAnotherEmployeesRequestAndDenialIsLogged() throws Exception {
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, leaveTypeId("Vacation"), "PENDING");
+
+        mockMvc.perform(get("/requests/{requestId}", requestId)
+                        .with(forwardedApiPrefix())
+                        .with(authenticatedAs(6L, "EMPLOYEE")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from access_log where actor_id = ? and resource = ? and allowed = false",
+                Integer.class, 6L, "GET /api/requests/" + requestId)).isEqualTo(1);
+    }
+
+    @Test
+    void requestDetailForUnknownIdReturnsNotFound() throws Exception {
+        mockMvc.perform(get("/requests/{requestId}", Long.MAX_VALUE)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
+    void invalidRequestStatusReturnsValidationProblem() throws Exception {
+        mockMvc.perform(get("/requests")
+                        .param("status", "UNKNOWN")
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
     }
 
     @Test
@@ -497,9 +629,26 @@ class LeaveRequestControllerIntegrationTest {
         return jdbcTemplate.queryForObject("select id from leave_types where name = ?", Long.class, name);
     }
 
+    private long insertRequest(long employeeId, long approverId, long leaveTypeId, String status) {
+        return jdbcTemplate.queryForObject("""
+                insert into leave_requests (
+                    employee_id, approver_id, leave_type_id, start_date, end_date,
+                    working_days, status, submitted_at
+                ) values (?, ?, ?, '2026-10-29', '2026-10-29', 1, ?, now())
+                returning id
+                """, Long.class, employeeId, approverId, leaveTypeId, status);
+    }
+
     private void dropNotificationFailureTrigger() {
         jdbcTemplate.execute("drop trigger if exists reject_test_notification on notifications");
         jdbcTemplate.execute("drop function if exists reject_test_notification()");
+    }
+
+    private RequestPostProcessor forwardedApiPrefix() {
+        return request -> {
+            request.addHeader("X-Forwarded-Prefix", "/api");
+            return request;
+        };
     }
 
     private RequestPostProcessor authenticatedAs(long userId, String role) {

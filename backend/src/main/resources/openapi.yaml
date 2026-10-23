@@ -182,9 +182,10 @@ paths:
       tags: [Leave Requests]
       summary: List leave requests
       description: >
-        Any user sees their own requests (FR4, FR5). Managers and HR use this
-        with query filters to see requests they're permitted to view; row-level
-        scoping is enforced server-side (FR22-FR24).
+        Any user sees their own requests (FR4, FR5). Without employeeId, a
+        manager sees their own requests and requests for direct reports. A
+        manager may filter to a direct report; HR may filter to any employee.
+        Row-level scoping is enforced server-side (FR22-FR24).
       x-functional-requirements: [FR4, FR5, FR22, FR23, FR24]
       parameters:
         - name: status
@@ -197,7 +198,9 @@ paths:
           schema:
             type: integer
             format: int64
-          description: Only honoured for a manager's direct report or when the caller is HR
+          description: >
+            Narrows a manager's list to one direct report, or HR's list to any
+            employee. A manager naming a non-report is refused.
       responses:
         '200':
           description: Matching leave requests
@@ -232,6 +235,19 @@ paths:
                   submittedAt: "2026-09-13T08:02:00Z"
                   decidedAt: "2026-09-13T11:40:00Z"
                   decisionComment: Feel better soon
+        '400':
+          description: Invalid status or employeeId query parameter
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: about:blank
+                title: Validation failed
+                status: 400
+                detail: Validation failed
+                instance: /api/requests
+                code: VALIDATION_FAILED
         '403':
           $ref: '#/components/responses/Forbidden'
     post:

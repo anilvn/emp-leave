@@ -1,5 +1,7 @@
 package com.company.leave.leave;
 
+import java.util.List;
+
 import com.company.leave.security.AccessPolicy;
 import com.company.leave.users.Role;
 import io.swagger.v3.oas.annotations.Operation;
@@ -13,9 +15,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -29,6 +34,42 @@ public class LeaveRequestController {
     LeaveRequestController(LeaveRequestService leaveRequestService, AccessPolicy accessPolicy) {
         this.leaveRequestService = leaveRequestService;
         this.accessPolicy = accessPolicy;
+    }
+
+    @Operation(summary = "List leave requests",
+            description = "Returns the caller's permitted requests, optionally filtered by status and employee.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Matching leave requests"),
+        @ApiResponse(responseCode = "400", description = "Invalid status or employee id",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "401", description = "No valid access_token cookie"),
+        @ApiResponse(responseCode = "403", description = "Requested employee is outside the caller's scope",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @GetMapping
+    public List<LeaveRequestResponse> listLeaveRequests(
+            @RequestParam(required = false) RequestStatus status,
+            @RequestParam(required = false) Long employeeId) {
+        return leaveRequestService.list(status, employeeId);
+    }
+
+    @Operation(summary = "Get one leave request",
+            description = "Visible to the request owner, the owner's direct manager, and HR.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "The leave request"),
+        @ApiResponse(responseCode = "401", description = "No valid access_token cookie"),
+        @ApiResponse(responseCode = "403", description = "Caller is outside the request's permitted scope",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "404", description = "Request not found",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @GetMapping("/{requestId}")
+    public LeaveRequestResponse getLeaveRequest(@PathVariable long requestId) {
+        return leaveRequestService.get(requestId);
     }
 
     @Operation(

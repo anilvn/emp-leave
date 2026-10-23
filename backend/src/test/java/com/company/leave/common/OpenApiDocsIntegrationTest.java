@@ -41,6 +41,8 @@ class OpenApiDocsIntegrationTest {
                 .andExpect(jsonPath("$.paths['/users'].post").exists())
                 .andExpect(jsonPath("$.paths['/users'].get").exists())
                 .andExpect(jsonPath("$.paths['/users/managers'].get").exists())
+                .andExpect(jsonPath("$.paths['/requests'].get").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}'].get").exists())
                 .andExpect(jsonPath("$.paths['/users/{userId}/reset-password'].post").exists());
     }
 
