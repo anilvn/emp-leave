@@ -59,18 +59,22 @@ class AccessPolicyTest {
         assertThatExceptionOfType(AccessDeniedException.class)
                 .isThrownBy(() -> accessPolicy.requireOwnerManagerOrHr(10L, 20L));
 
-        authenticate(20L, Role.EMPLOYEE);
+        authenticate(40L, Role.MANAGER);
         assertThatExceptionOfType(AccessDeniedException.class)
                 .isThrownBy(() -> accessPolicy.requireOwnerManagerOrHr(10L, 20L));
     }
 
     @Test
     void requireRoleAllowsOnlyMatchingRoles() {
-        authenticate(11L, Role.EMPLOYEE);
-        accessPolicy.requireRole(Role.MANAGER, Role.EMPLOYEE);
+        long userId = 11L;
+        for (Role role : Role.values()) {
+            authenticate(userId++, role);
+            accessPolicy.requireRole(role);
 
-        assertThatExceptionOfType(AccessDeniedException.class)
-                .isThrownBy(() -> accessPolicy.requireRole(Role.MANAGER, Role.HR_ADMIN));
+            Role otherRole = role == Role.EMPLOYEE ? Role.MANAGER : Role.EMPLOYEE;
+            assertThatExceptionOfType(AccessDeniedException.class)
+                    .isThrownBy(() -> accessPolicy.requireRole(otherRole));
+        }
         assertThatExceptionOfType(AccessDeniedException.class).isThrownBy(() -> accessPolicy.requireRole());
     }
 

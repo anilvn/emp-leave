@@ -17,3 +17,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-5-one-permission-layer-for-every-endpoint.md`
   summary: Define how the access log selects one `resourceId` for routes containing multiple numeric path segments.
   evidence: `AccessLogFilter` currently selects the last numeric segment, but composite/nested route shapes can contain multiple IDs and the story does not define which one is the audited resource. Route-specific semantics are needed to settle the correct value without misattributing access.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-5-one-permission-layer-for-every-endpoint.md`
+  summary: Define the client-visible and transactional behavior when access-log persistence fails after an API operation has run.
+  evidence: `AccessLogFilter` writes the audit row after the request chain and propagates write failures, but no fault-injection integration test establishes whether a completed state change remains committed or what response the client receives. Test a state-changing request with a forced audit-write failure to determine whether a mutation can succeed while the caller sees an error and may retry.

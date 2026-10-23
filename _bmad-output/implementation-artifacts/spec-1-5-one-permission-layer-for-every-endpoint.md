@@ -72,9 +72,11 @@ Existing `access_log` records have no action column, so HTTP method is included 
 - Search backend controllers and services for role comparisons and `hasRole(...)`; policy decisions must remain centralized, with only filter-chain configuration exempt.
 
 **Results:**
-- `backend\\mvnw.cmd -f backend\\pom.xml test` -- `BUILD SUCCESS`; 30 tests, zero failures, errors, or skips.
+- `backend\\mvnw.cmd -f backend\\pom.xml test` -- `BUILD SUCCESS`; 32 tests, zero failures, errors, or skips.
+- `backend\\mvnw.cmd -f backend\\pom.xml "-Dtest=AccessPolicyTest,AccessLogFilterIntegrationTest" test` -- `BUILD SUCCESS`; 9 focused tests passed after review fixes.
 - The backend source search found policy decisions in `AccessPolicy`; `JwtAuthenticationFilter` establishes role authorities and `GlobalExceptionHandler` maps denials. `AuthController.logout` now delegates supported-role authorization to `AccessPolicy`.
-- Proxy-path integration tests verify that requests forwarded with `/api` are audited under their external path, while unauthenticated and public login requests are omitted.
+- Proxy-path integration tests verify that requests forwarded with `/api` are audited under their external path, while unauthenticated and public login requests are omitted. An automated configuration assertion verifies that Nginx forwards the prefix from its `/api/` location.
+- `git diff --check` -- passed; backend source search found no role comparisons or `hasRole(...)` checks outside `AccessPolicy`.
 
 ## Spec Change Log
 
@@ -93,3 +95,11 @@ Existing `access_log` records have no action column, so HTTP method is included 
 - **maybe-false — defer, Edge Case Hunter: multiple numeric path segments.** Same unresolved route-to-resource-ID semantics as the Blind Hunter finding; resolving route-specific IDs will settle it.
 - **false, Edge Case Hunter: non-403 responses are logged as allowed.** As above, only the configured 403 outcome denotes access denial; later handler errors do not undo authorization.
 - **medium — patch (fixed), implementation verification: reverse proxy strips `/api/`.** `proxy_pass` rewrites the path before the backend sees it, so the filter previously skipped all proxied API traffic. Nginx now forwards the prefix and the filter reconstructs the external path; integration tests cover the rewritten route and public login exclusion.
+- **false, Blind Hunter: a non-authorization 403 is recorded as a denied authorization.** The backend source search found only the `AccessDeniedException` handler producing 403; there is no current non-authorization 403 path, and the planned `PASSWORD_CHANGE_REQUIRED` response is also an authorization gate.
+- **maybe-false — defer, Blind Hunter: multiple numeric path segments (carried).** Carried: the prior triage entry and deferred-work record already capture that selecting the correct resource ID for nested routes requires route-specific semantics; no new implementation change is warranted here.
+- **false, Blind Hunter: request-controlled owner/manager IDs can authorize an unrelated caller.** There are no production callers of `requireOwnerManagerOrHr`; the signature requires resource owner/manager IDs, and no current request path supplies those arguments from user input.
+- **false, Blind Hunter: `ManagerTeam` membership and active-user semantics are undefined.** Epic 1 context defines manager visibility as direct reports, and this story only introduces the scope value; no collection query or active-user rule is implemented here.
+- **maybe-false — defer, Blind Hunter: audit persistence failure after a state-changing request.** The filter writes in `finally` after endpoint execution, but current tests do not establish the client response or committed state when audit persistence fails. A fault-injection test on a state-changing request is needed to settle whether the client can see an error after the mutation commits.
+- **medium — patch (fixed), Blind Hunter: the null `resourceId` case had no test.** Added an authenticated collection-route test asserting exactly one row with a null resource ID and the expected actor/outcome; focused tests pass.
+- **maybe-false — defer, Edge Case Hunter: multiple numeric path segments (carried).** Carried: this is the same route-to-resource-ID ambiguity already recorded and deferred above.
+- **medium — patch (fixed), Verification Gap Reviewer: the proxy prefix was only simulated in MockMvc.** Added an automated assertion that Nginx sets `X-Forwarded-Prefix: /api` inside its `/api/` location; the proxy setting and request-path reconstruction are now both checked.

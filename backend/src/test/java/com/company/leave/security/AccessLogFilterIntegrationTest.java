@@ -1,5 +1,8 @@
 package com.company.leave.security;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import javax.sql.DataSource;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -76,6 +79,25 @@ class AccessLogFilterIntegrationTest {
     }
 
     @Test
+    void authenticatedCollectionRequestStoresNullResourceId() throws Exception {
+        long actorId = 7005L;
+        String resource = "GET /api/audit-test";
+
+        mockMvc.perform(get("/audit-test")
+                        .with(forwardedApiPrefix())
+                        .with(authenticatedAs(actorId)))
+                .andExpect(status().isOk());
+
+        assertThat(countRows(resource)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select actor_id from access_log where resource = ?", Long.class, resource)).isEqualTo(actorId);
+        assertThat(jdbcTemplate.queryForObject(
+                "select resource_id from access_log where resource = ?", Long.class, resource)).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "select allowed from access_log where resource = ?", Boolean.class, resource)).isTrue();
+    }
+
+    @Test
     void authenticatedDeniedApiRequestWritesOneDeniedRow() throws Exception {
         long actorId = 7002L;
         long resourceId = System.currentTimeMillis();
@@ -117,6 +139,23 @@ class AccessLogFilterIntegrationTest {
         assertThat(countRows("POST /api/auth/login")).isZero();
     }
 
+    @Test
+    void proxyForwardsApiPrefixNeededByAccessLogFilter() throws IOException {
+        String config = Files.readString(proxyConfigPath());
+        String apiLocationStart = "location /api/ {";
+        int start = config.indexOf(apiLocationStart);
+        if (start < 0) {
+            throw new AssertionError("Nginx API location is missing");
+        }
+        int end = config.indexOf("\n        }", start);
+        if (end < 0) {
+            throw new AssertionError("Nginx API location is not closed");
+        }
+
+        assertThat(config.substring(start, end))
+                .contains("proxy_set_header X-Forwarded-Prefix /api;");
+    }
+
     private RequestPostProcessor forwardedApiPrefix() {
         return request -> {
             request.addHeader("X-Forwarded-Prefix", "/api");
@@ -134,9 +173,23 @@ class AccessLogFilterIntegrationTest {
                 "select count(*) from access_log where resource = ?", Integer.class, resource);
     }
 
+    private Path proxyConfigPath() {
+        for (Path candidate : new Path[] {Path.of("proxy", "nginx.conf"), Path.of("..", "proxy", "nginx.conf")}) {
+            if (Files.isRegularFile(candidate)) {
+                return candidate;
+            }
+        }
+        throw new IllegalStateException("Could not locate proxy/nginx.conf from the test working directory");
+    }
+
     @RestController
     @RequestMapping("/audit-test")
     static class TestController {
+
+        @GetMapping
+        ResponseEntity<Void> collection() {
+            return ResponseEntity.ok().build();
+        }
 
         @GetMapping("/{id}")
         ResponseEntity<Void> allowed(@PathVariable long id) {
