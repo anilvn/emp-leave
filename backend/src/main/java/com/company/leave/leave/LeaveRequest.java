@@ -74,4 +74,14 @@ class LeaveRequest {
         this.status = status;
         this.submittedAt = submittedAt;
     }
+
+    void updatePendingDetails(LocalDate startDate, LocalDate endDate, int workingDays, String notes) {
+        if (status != RequestStatus.PENDING) {
+            throw new IllegalStateException("Only pending requests can be edited");
+        }
+        this.startDate = startDate;
+        this.endDate = endDate;
+        this.workingDays = workingDays;
+        this.notes = notes;
+    }
 }

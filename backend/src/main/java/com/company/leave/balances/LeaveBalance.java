@@ -35,4 +35,12 @@ class LeaveBalance {
         }
         this.reservedDays += delta;
     }
+
+    void adjustReservation(int delta) {
+        int updatedReservedDays = this.reservedDays + delta;
+        if (updatedReservedDays < 0 || updatedReservedDays > totalDays) {
+            throw new IllegalArgumentException("adjusted reservation must remain within the balance");
+        }
+        this.reservedDays = updatedReservedDays;
+    }
 }

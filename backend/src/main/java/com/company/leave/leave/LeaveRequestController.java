@@ -18,6 +18,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -98,5 +99,32 @@ public class LeaveRequestController {
         long userId = ((Number) authentication.getPrincipal()).longValue();
         LeaveRequestResponse response = leaveRequestService.submit(request, userId);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @Operation(
+            summary = "Modify a pending leave request",
+            description = "Only the request owner may edit a pending request. Leave type must remain unchanged.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Updated request",
+                content = @Content(mediaType = "application/json",
+                        schema = @Schema(implementation = LeaveRequestResponse.class))),
+        @ApiResponse(responseCode = "400", description = "Validation failed or leave type changed",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "403", description = "Caller is not the request owner",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "404", description = "Request not found",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "409", description = "Request is terminal or balance is insufficient",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @PutMapping("/{requestId}")
+    public LeaveRequestResponse updateLeaveRequest(
+            @PathVariable long requestId,
+            @Valid @RequestBody LeaveRequestUpdateRequest request) {
+        return leaveRequestService.update(requestId, request);
     }
 }

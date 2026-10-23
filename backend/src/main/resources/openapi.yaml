@@ -420,18 +420,18 @@ paths:
                   summary: General validation failure
                   value:
                     type: about:blank
-                    title: Validation failed
+                    title: Bad Request
                     status: 400
-                    detail: endDate (2026-10-26) must be on or after startDate (2026-10-30).
+                    detail: endDate must be on or after startDate
                     instance: /api/requests/101
                     code: VALIDATION_FAILED
                 leaveTypeChangeNotAllowed:
                   summary: Attempted to change leave type on an existing request
                   value:
                     type: about:blank
-                    title: Leave type change not allowed
+                    title: Bad Request
                     status: 400
-                    detail: Request 101 was submitted as Vacation (leaveTypeId 1) and cannot be changed to Sick (leaveTypeId 2). Cancel it and submit a new request instead.
+                    detail: Request 101 was submitted as leaveTypeId 1 and cannot be changed to leaveTypeId 2.
                     instance: /api/requests/101
                     code: LEAVE_TYPE_CHANGE_NOT_ALLOWED
         '403':
@@ -442,11 +442,13 @@ paths:
                 $ref: '#/components/schemas/ProblemDetail'
               example:
                 type: about:blank
-                title: Access denied
+                title: Forbidden
                 status: 403
-                detail: Only the request's owner may edit it.
+                detail: Access is denied
                 instance: /api/requests/101
                 code: ACCESS_DENIED
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           description: Request is no longer PENDING, or reservation would exceed available balance
           content:
@@ -458,7 +460,7 @@ paths:
                   summary: Request is no longer PENDING
                   value:
                     type: about:blank
-                    title: Invalid transition
+                    title: Conflict
                     status: 409
                     detail: Request 101 is APPROVED and can no longer be edited.
                     instance: /api/requests/101
@@ -467,9 +469,9 @@ paths:
                   summary: Lengthened range exceeds available balance (FR31)
                   value:
                     type: about:blank
-                    title: Insufficient balance
+                    title: Conflict
                     status: 409
-                    detail: Edit would reserve 8 working days of Vacation but only 6 are available to this request (4 already held by it, 2 otherwise free). The existing reservation is unchanged.
+                    detail: Edit would reserve 8 working days but only 6 are available to this request.
                     instance: /api/requests/101
                     code: INSUFFICIENT_BALANCE
 

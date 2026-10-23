@@ -7,7 +7,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Value;
 
-@Schema(description = "A leave request")
+@Schema(name = "LeaveRequest", description = "A leave request")
 @Value
 @Builder
 public class LeaveRequestResponse {

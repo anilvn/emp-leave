@@ -43,6 +43,16 @@ class OpenApiDocsIntegrationTest {
                 .andExpect(jsonPath("$.paths['/users/managers'].get").exists())
                 .andExpect(jsonPath("$.paths['/requests'].get").exists())
                 .andExpect(jsonPath("$.paths['/requests/{requestId}'].get").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}'].put").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}'].put.responses['200']").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}'].put.responses['404']").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}'].put.responses['400']").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}'].put.responses['403']").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}'].put.responses['409']").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}'].put.requestBody.content['application/json'].schema.$ref")
+                        .value("#/components/schemas/LeaveRequestUpdate"))
+                .andExpect(jsonPath("$.paths['/requests/{requestId}'].put.responses['200'].content['application/json'].schema.$ref")
+                        .value("#/components/schemas/LeaveRequest"))
                 .andExpect(jsonPath("$.paths['/users/{userId}/reset-password'].post").exists());
     }
 

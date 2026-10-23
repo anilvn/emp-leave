@@ -24,6 +24,12 @@ public class AccessPolicy {
         }
     }
 
+    public void requireOwner(long ownerId) {
+        if (currentCaller().userId() != ownerId) {
+            throw denied();
+        }
+    }
+
     public UserScope currentScope() {
         Caller caller = currentCaller();
         return switch (caller.role()) {

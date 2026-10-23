@@ -1,6 +1,13 @@
 package com.company.leave.leave;
 
+import java.sql.Connection;
+import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
 
 import com.jayway.jsonpath.JsonPath;
@@ -29,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -58,6 +66,7 @@ class LeaveRequestControllerIntegrationTest {
     void setUp() {
         jdbcTemplate = new JdbcTemplate(dataSource);
         dropNotificationFailureTrigger();
+        dropEditAuditFailureTrigger();
         jdbcTemplate.update("delete from active_sessions");
         jdbcTemplate.update(
                 "update users set must_change_password = false where id in (?, ?)", EMPLOYEE_ID, MANAGER_ID);
@@ -66,6 +75,7 @@ class LeaveRequestControllerIntegrationTest {
     @AfterEach
     void cleanUp() {
         dropNotificationFailureTrigger();
+        dropEditAuditFailureTrigger();
         // Notification and balance-ledger rows reference requests, so delete them first.
         jdbcTemplate.update("delete from notifications");
         jdbcTemplate.update("delete from balance_ledger");
@@ -625,8 +635,433 @@ class LeaveRequestControllerIntegrationTest {
         assertThat(jdbcTemplate.queryForObject("select count(*) from leave_requests", Integer.class)).isZero();
     }
 
+    @Test
+    void ownerCanEditPendingRequestAndChangedReservationIsAudited() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Family trip");
+        int notificationsBefore = jdbcTemplate.queryForObject(
+                "select count(*) from notifications where request_id = ?", Integer.class, requestId);
+        Instant submittedAt = jdbcTemplate.queryForObject(
+                "select submitted_at from leave_requests where id = ?", java.sql.Timestamp.class, requestId).toInstant();
+
+        MvcResult editResult = mockMvc.perform(put("/requests/{requestId}", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "leaveTypeId": %d,
+                                    "startDate": "2026-10-30",
+                                    "endDate": "2026-11-03",
+                                    "notes": "Trip shortened"
+                                }
+                                """.formatted(vacationTypeId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value((int) requestId))
+                .andExpect(jsonPath("$.employeeId").value((int) EMPLOYEE_ID))
+                .andExpect(jsonPath("$.approverId").value((int) MANAGER_ID))
+                .andExpect(jsonPath("$.leaveTypeId").value((int) vacationTypeId))
+                .andExpect(jsonPath("$.startDate").value("2026-10-30"))
+                .andExpect(jsonPath("$.endDate").value("2026-11-03"))
+                .andExpect(jsonPath("$.workingDays").value(3))
+                .andExpect(jsonPath("$.notes").value("Trip shortened"))
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.submittedAt").exists())
+                .andExpect(jsonPath("$.decidedAt").isEmpty())
+                .andExpect(jsonPath("$.decisionComment").isEmpty())
+                .andReturn();
+        assertThat(Instant.parse(JsonPath.read(editResult.getResponse().getContentAsString(), "$.submittedAt")))
+                .isEqualTo(submittedAt);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(3);
+        assertThat(jdbcTemplate.queryForList(
+                "select kind || ':' || change_days from balance_ledger where request_id = ? order by id",
+                String.class, requestId)).containsExactly("RESERVE:4", "RELEASE:-4", "RESERVE:3");
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from audit_events where entity = 'LEAVE_REQUEST' "
+                        + "and action = 'LEAVE_REQUEST_EDITED' and entity_id = ?",
+                Integer.class, requestId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from notifications where request_id = ?", Integer.class, requestId))
+                .isEqualTo(notificationsBefore);
+    }
+
+    @Test
+    void editingUnknownRequestReturnsNotFoundWithoutSideEffects() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        Integer reservedBefore = jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId);
+        int ledgerBefore = jdbcTemplate.queryForObject("select count(*) from balance_ledger", Integer.class);
+        int auditBefore = jdbcTemplate.queryForObject("select count(*) from audit_events", Integer.class);
+
+        mockMvc.perform(put("/requests/{requestId}", Long.MAX_VALUE)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody(vacationTypeId, "2026-10-30", "2026-10-30", "Missing")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(reservedBefore);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from balance_ledger", Integer.class))
+                .isEqualTo(ledgerBefore);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from audit_events", Integer.class))
+                .isEqualTo(auditBefore);
+    }
+
+    @Test
+    void simultaneousEditsKeepRequestAndReservationConsistent() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (Connection balanceLock = dataSource.getConnection()) {
+            balanceLock.setAutoCommit(false);
+            try (var statement = balanceLock.prepareStatement(
+                    "select reserved_days from leave_balances where user_id = ? and leave_type_id = ? for update")) {
+                statement.setLong(1, EMPLOYEE_ID);
+                statement.setLong(2, vacationTypeId);
+                statement.executeQuery().close();
+            }
+
+            Future<Integer> first = executor.submit(() -> {
+                ready.countDown();
+                start.await();
+                return performEdit(requestId, vacationTypeId, "2026-11-09", "2026-11-13", "Five days");
+            });
+            Future<Integer> second = executor.submit(() -> {
+                ready.countDown();
+                start.await();
+                return performEdit(requestId, vacationTypeId, "2026-11-16", "2026-11-23", "Six days");
+            });
+
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            awaitRequestLockWaiters();
+            balanceLock.commit();
+
+            assertThat(first.get(10, TimeUnit.SECONDS)).isEqualTo(200);
+            assertThat(second.get(10, TimeUnit.SECONDS)).isEqualTo(200);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        int requestDays = jdbcTemplate.queryForObject(
+                "select working_days from leave_requests where id = ?", Integer.class, requestId);
+        int reservedDays = jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId);
+        int ledgerDays = jdbcTemplate.queryForObject(
+                "select sum(change_days) from balance_ledger where request_id = ?", Integer.class, requestId);
+        assertThat(reservedDays).isEqualTo(requestDays);
+        assertThat(ledgerDays).isEqualTo(requestDays);
+    }
+
+    @Test
+    void editWithSameWorkingDaysDoesNotWriteBalanceLedgerRows() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");
+
+        mockMvc.perform(put("/requests/{requestId}", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "leaveTypeId": %d,
+                                    "startDate": "2026-11-06",
+                                    "endDate": "2026-11-11",
+                                    "notes": "New dates, same number of days"
+                                }
+                                """.formatted(vacationTypeId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workingDays").value(4));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(4);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from balance_ledger where request_id = ?", Integer.class, requestId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from audit_events where entity_id = ? and action = 'LEAVE_REQUEST_EDITED'",
+                Integer.class, requestId)).isEqualTo(1);
+    }
+
+    @Test
+    void editCanUseItsOwnReservationPlusOtherAvailableDays() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");
+        jdbcTemplate.update(
+                "update leave_balances set total_days = 6 where user_id = ? and leave_type_id = ?",
+                EMPLOYEE_ID, vacationTypeId);
+
+        mockMvc.perform(put("/requests/{requestId}", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody(vacationTypeId, "2026-11-09", "2026-11-13", "Five days")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workingDays").value(5));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(5);
+        assertThat(jdbcTemplate.queryForList(
+                "select kind || ':' || change_days from balance_ledger where request_id = ? order by id",
+                String.class, requestId)).containsExactly("RESERVE:4", "RELEASE:-4", "RESERVE:5");
+    }
+
+    @Test
+    void editOfTerminalRequestReturnsConflictWithoutChangingRequestOrBalance() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        for (String terminalStatus : new String[] {"APPROVED", "REJECTED", "CANCELLED"}) {
+            long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, vacationTypeId, terminalStatus);
+
+            mockMvc.perform(put("/requests/{requestId}", requestId)
+                            .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(updateBody(vacationTypeId, "2026-10-30", "2026-10-30", "Changed")))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value("INVALID_TRANSITION"));
+
+            assertThat(jdbcTemplate.queryForObject(
+                    "select status from leave_requests where id = ?", String.class, requestId))
+                    .isEqualTo(terminalStatus);
+            assertThat(jdbcTemplate.queryForObject(
+                    "select count(*) from audit_events where entity_id = ? and action = 'LEAVE_REQUEST_EDITED'",
+                    Integer.class, requestId)).isZero();
+        }
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isZero();
+    }
+
+    @Test
+    void changingLeaveTypeIsRejectedWithoutChangingRequestOrReservation() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long sickTypeId = leaveTypeId("Sick");
+        long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");
+
+        mockMvc.perform(put("/requests/{requestId}", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody(sickTypeId, "2026-10-30", "2026-11-03", "Changed")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("LEAVE_TYPE_CHANGE_NOT_ALLOWED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select leave_type_id from leave_requests where id = ?", Long.class, requestId)).isEqualTo(vacationTypeId);
+        assertThat(jdbcTemplate.queryForObject(
+                "select working_days from leave_requests where id = ?", Integer.class, requestId)).isEqualTo(4);
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(4);
+    }
+
+    @Test
+    void invalidEditDateRangesReturnValidationErrorWithoutChangingRequest() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");
+        for (String[] dates : new String[][] {
+                {"2026-11-03", "2026-10-29"},
+                {"2026-10-31", "2026-11-01"}
+        }) {
+            mockMvc.perform(put("/requests/{requestId}", requestId)
+                            .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(updateBody(vacationTypeId, dates[0], dates[1], "Changed")))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        }
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select start_date::text || ':' || end_date::text || ':' || working_days || ':' || notes "
+                        + "from leave_requests where id = ?",
+                String.class, requestId)).isEqualTo("2026-10-29:2026-11-03:4:Original");
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(4);
+    }
+
+    @Test
+    void unrepresentableEditRangeReturnsValidationErrorWithoutChangingReservation() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");
+
+        mockMvc.perform(put("/requests/{requestId}", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody(vacationTypeId, "0001-01-01", "+999999999-12-31", "Too broad")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select working_days from leave_requests where id = ?", Integer.class, requestId)).isEqualTo(4);
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(4);
+    }
+
+    @Test
+    void insufficientAdditionalBalanceLeavesRequestReservationAndLedgerUnchanged() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");
+        jdbcTemplate.update(
+                "update leave_balances set total_days = 4 where user_id = ? and leave_type_id = ?",
+                EMPLOYEE_ID, vacationTypeId);
+
+        mockMvc.perform(put("/requests/{requestId}", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody(vacationTypeId, "2026-11-09", "2026-11-13", "Five days")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("INSUFFICIENT_BALANCE"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select start_date::text || ':' || end_date::text || ':' || working_days || ':' || notes "
+                        + "from leave_requests where id = ?",
+                String.class, requestId)).isEqualTo("2026-10-29:2026-11-03:4:Original");
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(4);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from balance_ledger where request_id = ?", Integer.class, requestId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from audit_events where entity_id = ? and action = 'LEAVE_REQUEST_EDITED'",
+                Integer.class, requestId)).isZero();
+    }
+
+    @Test
+    void onlyOwnerCanEditAndDeniedAccessIsLogged() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");
+        long[] actors = {6L, MANAGER_ID, 1L};
+        String[] roles = {"EMPLOYEE", "MANAGER", "HR_ADMIN"};
+
+        for (int index = 0; index < actors.length; index++) {
+            mockMvc.perform(put("/requests/{requestId}", requestId)
+                            .with(forwardedApiPrefix())
+                            .with(authenticatedAs(actors[index], roles[index]))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(updateBody(vacationTypeId, "2026-10-30", "2026-11-03", "Unauthorized")))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+            assertThat(jdbcTemplate.queryForObject(
+                    "select count(*) from access_log where actor_id = ? and resource = ? and allowed = false",
+                    Integer.class, actors[index], "PUT /api/requests/" + requestId)).isEqualTo(1);
+        }
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select notes from leave_requests where id = ?", String.class, requestId)).isEqualTo("Original");
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(4);
+    }
+
+    @Test
+    void auditFailureRollsBackEditRequestReservationAndLedger() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");
+        jdbcTemplate.execute("""
+                create or replace function reject_test_edit_audit() returns trigger as $$
+                begin
+                    if new.action = 'LEAVE_REQUEST_EDITED' then
+                        raise exception 'intentional edit audit failure';
+                    end if;
+                    return new;
+                end;
+                $$ language plpgsql
+                """);
+        jdbcTemplate.execute("""
+                create trigger reject_test_edit_audit
+                before insert on audit_events
+                for each row execute function reject_test_edit_audit()
+                """);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> mockMvc.perform(
+                        put("/requests/{requestId}", requestId)
+                                .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(updateBody(vacationTypeId, "2026-10-30", "2026-11-03", "Changed"))))
+                .hasMessageContaining("intentional edit audit failure");
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select start_date::text || ':' || end_date::text || ':' || working_days || ':' || notes "
+                        + "from leave_requests where id = ?",
+                String.class, requestId)).isEqualTo("2026-10-29:2026-11-03:4:Original");
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(4);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from balance_ledger where request_id = ?", Integer.class, requestId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from audit_events where entity_id = ? and action = 'LEAVE_REQUEST_EDITED'",
+                Integer.class, requestId)).isZero();
+    }
+
     private long leaveTypeId(String name) {
         return jdbcTemplate.queryForObject("select id from leave_types where name = ?", Long.class, name);
+    }
+
+    private long createPendingRequest(long leaveTypeId, String startDate, String endDate, String notes)
+            throws Exception {
+        MvcResult result = mockMvc.perform(post("/requests")
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "leaveTypeId": %d,
+                                    "startDate": "%s",
+                                    "endDate": "%s",
+                                    "notes": "%s"
+                                }
+                                """.formatted(leaveTypeId, startDate, endDate, notes)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        return ((Number) JsonPath.read(result.getResponse().getContentAsString(), "$.id")).longValue();
+    }
+
+    private String updateBody(long leaveTypeId, String startDate, String endDate, String notes) {
+        return """
+                {
+                    "leaveTypeId": %d,
+                    "startDate": "%s",
+                    "endDate": "%s",
+                    "notes": "%s"
+                }
+                """.formatted(leaveTypeId, startDate, endDate, notes);
+    }
+
+    private int performEdit(long requestId, long leaveTypeId, String startDate, String endDate, String notes)
+            throws Exception {
+        return mockMvc.perform(put("/requests/{requestId}", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateBody(leaveTypeId, startDate, endDate, notes)))
+                .andReturn()
+                .getResponse()
+                .getStatus();
+    }
+
+    private void awaitRequestLockWaiters() throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            int waiting = jdbcTemplate.queryForObject("""
+                    select count(*)
+                    from pg_stat_activity
+                    where datname = current_database()
+                      and wait_event_type = 'Lock'
+                      and (query ilike '%leave_balances%' or query ilike '%leave_requests%')
+                    """, Integer.class);
+            if (waiting >= 2) {
+                return;
+            }
+            Thread.sleep(25);
+        }
+        throw new AssertionError("Both edit transactions did not reach a row-lock wait");
     }
 
     private long insertRequest(long employeeId, long approverId, long leaveTypeId, String status) {
@@ -642,6 +1077,11 @@ class LeaveRequestControllerIntegrationTest {
     private void dropNotificationFailureTrigger() {
         jdbcTemplate.execute("drop trigger if exists reject_test_notification on notifications");
         jdbcTemplate.execute("drop function if exists reject_test_notification()");
+    }
+
+    private void dropEditAuditFailureTrigger() {
+        jdbcTemplate.execute("drop trigger if exists reject_test_edit_audit on audit_events");
+        jdbcTemplate.execute("drop function if exists reject_test_edit_audit()");
     }
 
     private RequestPostProcessor forwardedApiPrefix() {

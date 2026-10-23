@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.Optional;
 
 import com.company.leave.security.UserScope;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
@@ -14,6 +16,10 @@ interface LeaveRequestRepository extends Repository<LeaveRequest, Long> {
     LeaveRequest save(LeaveRequest request);
 
     Optional<LeaveRequest> findById(Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select request from LeaveRequest request where request.id = :id")
+    Optional<LeaveRequest> findByIdForUpdate(@Param("id") Long id);
 
     @Query("""
             select request from LeaveRequest request

@@ -76,6 +76,45 @@ public class BalanceService {
                 "Leave request " + requestId, actorId, requestId, Instant.now()));
     }
 
+    /**
+     * Replaces a request's held days without exposing them as available to other requests.
+     * Must be called inside the request's transaction.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void adjustReservation(long userId, long leaveTypeId, int currentWorkingDays,
+                                  int newWorkingDays, long actorId, long requestId) {
+        if (currentWorkingDays == newWorkingDays) {
+            return;
+        }
+
+        LeaveBalanceId balanceId = new LeaveBalanceId(userId, leaveTypeId);
+        LeaveBalance balance = leaveBalanceRepository.findById(balanceId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.CONFLICT, ErrorCode.INSUFFICIENT_BALANCE,
+                        "No balance row exists for userId=" + userId + " leaveTypeId=" + leaveTypeId));
+
+        int availableToRequest = balance.getTotalDays() - balance.getReservedDays() + currentWorkingDays;
+        if (newWorkingDays > availableToRequest) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.INSUFFICIENT_BALANCE,
+                    "Edit would reserve " + newWorkingDays + " working days but only "
+                            + availableToRequest + " are available to this request.");
+        }
+
+        balance.adjustReservation(newWorkingDays - currentWorkingDays);
+        leaveBalanceRepository.save(balance);
+
+        Instant now = Instant.now();
+        String reason = "Edited leave request " + requestId;
+        balanceLedgerRepository.save(new BalanceLedger(
+                userId, leaveTypeId, -currentWorkingDays, LedgerKind.RELEASE,
+                reason + ": released previous reservation", actorId, requestId, now));
+        balanceLedgerRepository.save(new BalanceLedger(
+                userId, leaveTypeId, newWorkingDays, LedgerKind.RESERVE,
+                reason + ": reserved updated amount", actorId, requestId, now));
+    }
+
     private BalanceResponse toBalanceResponse(long userId, LeaveTypeResponse leaveType, LeaveBalance balance) {
         int totalDays = balance == null ? 0 : balance.getTotalDays();
         int reservedDays = balance == null ? 0 : balance.getReservedDays();

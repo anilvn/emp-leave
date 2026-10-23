@@ -1,6 +1,7 @@
 package com.company.leave.leave;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 import com.company.leave.audit.AuditService;
@@ -81,6 +82,57 @@ public class LeaveRequestService {
     }
 
     @Transactional
+    public LeaveRequestResponse update(long requestId, LeaveRequestUpdateRequest update) {
+        LeaveRequest request = leaveRequestRepository.findByIdForUpdate(requestId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        ErrorCode.NOT_FOUND,
+                        "Leave request " + requestId + " does not exist."));
+        accessPolicy.requireOwner(request.getEmployeeId());
+        if (request.getStatus() != RequestStatus.PENDING) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.INVALID_TRANSITION,
+                    "Request " + requestId + " is " + request.getStatus() + " and can no longer be edited.");
+        }
+        if (!update.getLeaveTypeId().equals(request.getLeaveTypeId())) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    ErrorCode.LEAVE_TYPE_CHANGE_NOT_ALLOWED,
+                    "Request " + requestId + " was submitted as leaveTypeId "
+                            + request.getLeaveTypeId() + " and cannot be changed to leaveTypeId "
+                            + update.getLeaveTypeId() + ".");
+        }
+        if (update.getEndDate().isBefore(update.getStartDate())) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    ErrorCode.VALIDATION_FAILED,
+                    "endDate must be on or after startDate");
+        }
+
+        int workingDays = calculateWorkingDays(update.getStartDate(), update.getEndDate());
+        if (workingDays == 0) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    ErrorCode.VALIDATION_FAILED,
+                    "Range yields zero working days");
+        }
+
+        long actorId = accessPolicy.currentUserId();
+        balanceService.adjustReservation(
+                request.getEmployeeId(),
+                request.getLeaveTypeId(),
+                request.getWorkingDays(),
+                workingDays,
+                actorId,
+                requestId);
+        request.updatePendingDetails(update.getStartDate(), update.getEndDate(), workingDays, update.getNotes());
+        leaveRequestRepository.save(request);
+        auditService.recordEvent("LEAVE_REQUEST", requestId, "LEAVE_REQUEST_EDITED", actorId, null);
+        return toResponse(request);
+    }
+
+    @Transactional
     public LeaveRequestResponse submit(LeaveRequestCreateRequest request, long actorId) {
         // 1. Validate leave type
         String leaveTypeName = leaveTypeService.findNameById(request.getLeaveTypeId())
@@ -99,7 +151,7 @@ public class LeaveRequestService {
         }
 
         // 3. Compute working days
-        int workingDays = WorkingDayCalculator.countWorkingDays(request.getStartDate(), request.getEndDate());
+        int workingDays = calculateWorkingDays(request.getStartDate(), request.getEndDate());
         if (workingDays == 0) {
             throw new ApiException(
                     HttpStatus.BAD_REQUEST,
@@ -165,5 +217,16 @@ public class LeaveRequestService {
                 .decidedAt(entity.getDecidedAt())
                 .decisionComment(entity.getDecisionComment())
                 .build();
+    }
+
+    private int calculateWorkingDays(LocalDate startDate, LocalDate endDate) {
+        try {
+            return WorkingDayCalculator.countWorkingDays(startDate, endDate);
+        } catch (ArithmeticException ex) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    ErrorCode.VALIDATION_FAILED,
+                    "Date range exceeds the supported working-day limit.");
+        }
     }
 }
