@@ -3,6 +3,15 @@ package com.company.leave.auth;
 import jakarta.servlet.http.Cookie;
 import javax.sql.DataSource;
 
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import com.company.leave.security.JwtService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -54,6 +63,8 @@ class AuthControllerIntegrationTest {
     void prepareDatabase() {
         jdbcTemplate = new JdbcTemplate(dataSource);
         jdbcTemplate.update("delete from active_sessions");
+        jdbcTemplate.update(
+                "update users set active = true, failed_logins = 0, locked_until = null where id = 5");
         for (String action : java.util.List.of("LOGIN", "LOGOUT")) {
             initialAuditCounts.put(action, currentAuditCount(action));
         }
@@ -117,6 +128,155 @@ class AuthControllerIntegrationTest {
         assertThat(wrongPassword.getResponse().getHeader("Set-Cookie")).isNull();
         assertThat(unknownUser.getResponse().getHeader("Set-Cookie")).isNull();
         assertThat(auditCount("LOGIN")).isZero();
+    }
+
+    @Test
+    void fifthConsecutiveFailureLocksAccountAndRevokesExistingSessions() throws Exception {
+        String existingToken = loginAndGetToken();
+        jdbcTemplate.update("update users set failed_logins = 4, locked_until = null where id = 5");
+
+        MvcResult fifthFailure = mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"emp.jsmith\",\"password\":\"wrong\"}"))
+                .andExpect(status().isLocked())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"))
+                .andExpect(jsonPath("$.detail").value(
+                        org.hamcrest.Matchers.containsString("after 5 failed login attempts.")))
+                .andReturn();
+
+        assertThat(fifthFailure.getResponse().getHeader("Set-Cookie")).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "select failed_logins from users where id = 5", Integer.class)).isEqualTo(5);
+        assertThat(jdbcTemplate.queryForObject(
+                "select locked_until > now() + interval '14 minutes' "
+                        + "and locked_until <= now() + interval '15 minutes' from users where id = 5",
+                Boolean.class)).isTrue();
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from active_sessions where user_id = 5", Integer.class)).isZero();
+        Timestamp lockedUntil = jdbcTemplate.queryForObject(
+                "select locked_until from users where id = 5", Timestamp.class);
+
+        mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(LOGIN_BODY))
+                .andExpect(status().isLocked())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"))
+                .andExpect(result -> assertThat(result.getResponse().getHeader("Set-Cookie")).isNull());
+        assertThat(jdbcTemplate.queryForObject(
+                "select locked_until from users where id = 5", Timestamp.class)).isEqualTo(lockedUntil);
+        mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"emp.jsmith\",\"password\":\"wrong\"}"))
+                .andExpect(status().isLocked())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"));
+        assertThat(jdbcTemplate.queryForObject(
+                "select locked_until from users where id = 5", Timestamp.class)).isEqualTo(lockedUntil);
+        mockMvc.perform(post("/auth/logout").cookie(new Cookie("access_token", existingToken)))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(auditCount("LOGIN")).isEqualTo(1);
+        assertThat(auditCount("LOGOUT")).isZero();
+    }
+
+    @Test
+    void failedPasswordsForInactiveAccountStillTriggerLockout() throws Exception {
+        jdbcTemplate.update("update users set active = false where id = 5");
+
+        for (int attempt = 0; attempt < 4; attempt++) {
+            mockMvc.perform(post("/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"username\":\"emp.jsmith\",\"password\":\"wrong\"}"))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
+        }
+        mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"emp.jsmith\",\"password\":\"wrong\"}"))
+                .andExpect(status().isLocked())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select failed_logins from users where id = 5", Integer.class)).isEqualTo(5);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from active_sessions where user_id = 5", Integer.class)).isZero();
+    }
+
+    @Test
+    void concurrentFailuresAreSerializedWithoutLosingCounterIncrements() throws Exception {
+        List<Integer> statuses = performConcurrentLogins("wrong", "wrong", "wrong", "wrong", "wrong");
+
+        assertThat(statuses).containsExactlyInAnyOrder(401, 401, 401, 401, 423);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select failed_logins from users where id = 5", Integer.class)).isEqualTo(5);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from active_sessions where user_id = 5", Integer.class)).isZero();
+    }
+
+    @Test
+    void concurrentSuccessfulLoginAndFifthFailureCannotCreateSessionAfterLockout() throws Exception {
+        String existingToken = loginAndGetToken();
+        jdbcTemplate.update("update users set failed_logins = 4, locked_until = null where id = 5");
+
+        List<Integer> statuses = performConcurrentLogins("Passw0rd1", "wrong");
+        if (statuses.contains(200)) {
+            assertThat(statuses).containsExactlyInAnyOrder(200, 401);
+            assertThat(jdbcTemplate.queryForObject(
+                    "select failed_logins from users where id = 5", Integer.class)).isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject(
+                    "select count(*) from active_sessions where user_id = 5", Integer.class)).isEqualTo(2);
+        } else {
+            assertThat(statuses).containsExactlyInAnyOrder(423, 423);
+            assertThat(jdbcTemplate.queryForObject(
+                    "select failed_logins from users where id = 5", Integer.class)).isEqualTo(5);
+            assertThat(jdbcTemplate.queryForObject(
+                    "select locked_until is not null from users where id = 5", Boolean.class)).isTrue();
+            assertThat(jdbcTemplate.queryForObject(
+                    "select count(*) from active_sessions where user_id = 5", Integer.class)).isZero();
+            mockMvc.perform(post("/auth/logout").cookie(new Cookie("access_token", existingToken)))
+                    .andExpect(status().isUnauthorized());
+        }
+    }
+
+    @Test
+    void successfulLoginResetsConsecutiveFailedAttempts() throws Exception {
+        for (int attempt = 0; attempt < 4; attempt++) {
+            mockMvc.perform(post("/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"username\":\"emp.jsmith\",\"password\":\"wrong\"}"))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
+        }
+        assertThat(jdbcTemplate.queryForObject(
+                "select failed_logins from users where id = 5", Integer.class)).isEqualTo(4);
+
+        mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(LOGIN_BODY))
+                .andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select failed_logins from users where id = 5", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "select locked_until from users where id = 5", java.sql.Timestamp.class)).isNull();
+    }
+
+    @Test
+    void expiredLockAllowsLoginAndResetsFailedAttempts() throws Exception {
+        jdbcTemplate.update(
+                "update users set failed_logins = 5, locked_until = ? where id = 5",
+                java.sql.Timestamp.from(Instant.now().minusSeconds(60)));
+
+        mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(LOGIN_BODY))
+                .andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select failed_logins from users where id = 5", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "select locked_until from users where id = 5", java.sql.Timestamp.class)).isNull();
     }
 
     @Test
@@ -186,6 +346,41 @@ class AuthControllerIntegrationTest {
                 .andReturn();
         String cookieHeader = result.getResponse().getHeader("Set-Cookie");
         return cookieHeader.substring("access_token=".length(), cookieHeader.indexOf(';'));
+    }
+
+    private List<Integer> performConcurrentLogins(String... passwords) throws Exception {
+        CountDownLatch ready = new CountDownLatch(passwords.length);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(passwords.length);
+        try {
+            List<Future<Integer>> attempts = new ArrayList<>();
+            for (String password : passwords) {
+                attempts.add(executor.submit(() -> {
+                    ready.countDown();
+                    if (!start.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Timed out waiting to start concurrent login attempts.");
+                    }
+                    return mockMvc.perform(post("/auth/login")
+                                    .contentType(MediaType.APPLICATION_JSON)
+                                    .content("{\"username\":\"emp.jsmith\",\"password\":\""
+                                            + password + "\"}"))
+                            .andReturn()
+                            .getResponse()
+                            .getStatus();
+                }));
+            }
+
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            List<Integer> statuses = new ArrayList<>();
+            for (Future<Integer> attempt : attempts) {
+                statuses.add(attempt.get(30, TimeUnit.SECONDS));
+            }
+            return statuses;
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
     }
 
     private int auditCount(String action) {

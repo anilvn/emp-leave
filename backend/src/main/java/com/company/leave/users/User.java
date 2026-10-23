@@ -1,5 +1,8 @@
 package com.company.leave.users;
 
+import java.time.Duration;
+import java.time.Instant;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -21,6 +24,9 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor(access = AccessLevel.PACKAGE)
 @Builder
 class User {
+
+    static final int MAX_FAILED_LOGINS = 5;
+    private static final Duration LOCK_DURATION = Duration.ofMinutes(15);
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -49,5 +55,23 @@ class User {
     private int failedLogins;
 
     @Column(name = "locked_until")
-    private java.time.Instant lockedUntil;
+    private Instant lockedUntil;
+
+    boolean isLockedAt(Instant now) {
+        return lockedUntil != null && now.isBefore(lockedUntil);
+    }
+
+    boolean recordFailedLogin(Instant now) {
+        failedLogins++;
+        if (failedLogins >= MAX_FAILED_LOGINS) {
+            lockedUntil = now.plus(LOCK_DURATION);
+            return true;
+        }
+        return false;
+    }
+
+    void clearFailedLogins() {
+        failedLogins = 0;
+        lockedUntil = null;
+    }
 }

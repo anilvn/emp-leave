@@ -15,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -44,6 +45,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
+    @Transactional(noRollbackFor = ApiException.class)
     public ResponseEntity<UserAccount> login(@Valid @RequestBody LoginRequest request) {
         UserAccount user = userService.authenticate(request.getUsername(), request.getPassword())
                 .orElseThrow(() -> new ApiException(
