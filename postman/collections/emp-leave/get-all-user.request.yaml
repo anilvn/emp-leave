@@ -9,7 +9,12 @@ description: "Generated from cURL: curl -X 'GET' \\\r
 url: http://localhost:8080/users
 method: GET
 headers:
-  accept: "*/*"
-  Cookie: |
-    {{json_web_token_0pej}}
+  - key: Cookie
+    value: |
+      {{json_web_token_0d7y}}
+    disabled: true
+auth:
+  type: bearer
+  credentials:
+    token: "{{json_web_token_0pej}}"
 order: 4000

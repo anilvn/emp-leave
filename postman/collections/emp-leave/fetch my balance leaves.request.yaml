@@ -1,0 +1,8 @@
+$kind: http-request
+description: "Fetch the authenticated user's leave balances across all leave types."
+url: "{{baseUrl}}/balances/me"
+method: GET
+headers:
+  accept: "*/*"
+  Cookie: access_token={{access_token}}
+order: 5000
