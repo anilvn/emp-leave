@@ -1,9 +1,11 @@
 package com.company.leave.users;
 
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import com.company.leave.audit.AuditService;
 import com.company.leave.common.ApiException;
@@ -18,11 +20,14 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class UserService {
 
+    private static final Pattern NEW_PASSWORD_PATTERN = Pattern.compile("^(?=.*[A-Za-z])(?=.*\\d).{8,72}$");
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final SessionRegistry sessionRegistry;
     private final AuditService auditService;
     private final String dummyPasswordHash;
+    private final SecureRandom secureRandom = new SecureRandom();
 
     UserService(
             UserRepository userRepository,
@@ -123,6 +128,59 @@ public class UserService {
         auditService.recordEvent("USER", user.getId(), "CREATE", actorId, null);
 
         return toResponse(user);
+    }
+
+    @Transactional
+    public void changePassword(long userId, String currentPassword, String newPassword) {
+        if (!NEW_PASSWORD_PATTERN.matcher(newPassword).matches()) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    ErrorCode.VALIDATION_FAILED,
+                    "Password must be at least 8 characters and include both letters and numbers.");
+        }
+
+        User user = userRepository
+                .findById(userId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND, "User not found."));
+        if (!passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
+            throw new ApiException(
+                    HttpStatus.UNAUTHORIZED, ErrorCode.INVALID_CREDENTIALS, "Current password is incorrect.");
+        }
+        if (passwordEncoder.matches(newPassword, user.getPasswordHash())) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    ErrorCode.VALIDATION_FAILED,
+                    "newPassword must be different from the current password.");
+        }
+
+        user.changePassword(passwordEncoder.encode(newPassword), false);
+        userRepository.save(user);
+        auditService.recordEvent("USER", userId, "CHANGE_PASSWORD", userId, null);
+    }
+
+    @Transactional
+    public String resetPassword(long targetUserId, long actorId) {
+        User user = userRepository
+                .findById(targetUserId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND, "User " + targetUserId + " does not exist."));
+
+        String temporaryPassword = generateTemporaryPassword();
+        user.changePassword(passwordEncoder.encode(temporaryPassword), true);
+        userRepository.save(user);
+        sessionRegistry.revokeAllForUser(targetUserId);
+        auditService.recordEvent("USER", targetUserId, "RESET_PASSWORD", actorId, null);
+        return temporaryPassword;
+    }
+
+    @Transactional(readOnly = true)
+    public boolean mustChangePassword(long userId) {
+        return userRepository.findById(userId).map(User::isMustChangePassword).orElse(false);
+    }
+
+    private String generateTemporaryPassword() {
+        // 12 digits (~40 bits of entropy), shaped like the contract's own Temp#8841 example.
+        return String.format("Temp#%012d", secureRandom.nextLong(1_000_000_000_000L));
     }
 
     @Transactional(readOnly = true)

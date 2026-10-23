@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -44,5 +45,16 @@ public class UserController {
     public ResponseEntity<List<ManagerOptionResponse>> listManagerOptions() {
         accessPolicy.requireRole(Role.HR_ADMIN);
         return ResponseEntity.ok(userService.listManagerOptions());
+    }
+
+    @PostMapping("/{userId}/reset-password")
+    public ResponseEntity<TemporaryPasswordResponse> resetPassword(
+            Authentication authentication, @PathVariable long userId) {
+        accessPolicy.requireRole(Role.HR_ADMIN);
+        long actorId = (Long) authentication.getPrincipal();
+        String temporaryPassword = userService.resetPassword(userId, actorId);
+        return ResponseEntity.ok(TemporaryPasswordResponse.builder()
+                .temporaryPassword(temporaryPassword)
+                .build());
     }
 }

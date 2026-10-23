@@ -74,4 +74,9 @@ class User {
         failedLogins = 0;
         lockedUntil = null;
     }
+
+    void changePassword(String passwordHash, boolean mustChangePassword) {
+        this.passwordHash = passwordHash;
+        this.mustChangePassword = mustChangePassword;
+    }
 }

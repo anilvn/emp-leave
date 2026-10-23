@@ -29,3 +29,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-6-hr-creates-accounts-with-a-role-and-a-manager.md`
   summary: `UserCreateRequest`'s Lombok `@Value` has no `toString` exclusion on `temporaryPassword`, so a future logging/debug statement on the request object would print the plaintext password.
   evidence: Pre-existing: `LoginRequest` (password field, no `toString` exclusion) has had the identical characteristic since an earlier story; Story 1.6's spec explicitly directed mirroring that exact convention. A fix (e.g. `@ToString.Exclude` or a custom `toString()`) should be applied codebase-wide to every password-carrying DTO, not just the newest one.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-7-forced-password-change-and-hr-password-reset.md`
+  summary: Confirm whether a deactivated (`active=false`) user can still change or have reset their own password through a stale, not-yet-expired session, since nothing in the filter chain re-checks `active` after initial login.
+  evidence: Neither `JwtAuthenticationFilter`/`SessionRegistry.touchOrReject` nor the new `changePassword`/`resetPassword` paths check `active` post-login in this diff — if true, every endpoint in the app shares this exposure, not just the two added by Story 1.7, so it is not this story's problem to fix alone. What would settle it: trace whether `active` is enforced anywhere beyond the initial `/auth/login` check.

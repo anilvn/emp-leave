@@ -64,9 +64,12 @@ class AuthControllerIntegrationTest {
         jdbcTemplate = new JdbcTemplate(dataSource);
         jdbcTemplate.update("delete from active_sessions");
         jdbcTemplate.update(
-                "update users set active = true, failed_logins = 0, locked_until = null where id = 5");
-        for (String action : java.util.List.of("LOGIN", "LOGOUT")) {
-            initialAuditCounts.put(action, currentAuditCount(action));
+                "update users set active = true, failed_logins = 0, locked_until = null, "
+                        + "must_change_password = false, "
+                        + "password_hash = '$2a$10$494KRTD7NLmmrKANwVPvQ.xFiOxOpaw9eS4p3hWmzs8GFT2ssDIri' "
+                        + "where id = 5");
+        for (String[] entityAction : new String[][] {{"AUTH", "LOGIN"}, {"AUTH", "LOGOUT"}, {"USER", "CHANGE_PASSWORD"}}) {
+            initialAuditCounts.put(auditKey(entityAction[0], entityAction[1]), currentAuditCount(entityAction[0], entityAction[1]));
         }
     }
 
@@ -346,6 +349,104 @@ class AuthControllerIntegrationTest {
         assertThat(auditCount("LOGIN") + auditCount("LOGOUT")).isEqualTo(3);
     }
 
+    @Test
+    void successfulChangePasswordReplacesHashClearsMustChangeFlagAndWritesAudit() throws Exception {
+        jdbcTemplate.update("update users set must_change_password = true where id = 5");
+        String token = loginAndGetToken();
+        String originalHash = jdbcTemplate.queryForObject(
+                "select password_hash from users where id = 5", String.class);
+
+        mockMvc.perform(post("/auth/change-password")
+                        .cookie(new Cookie("access_token", token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"Passw0rd1\",\"newPassword\":\"NewPass2\"}"))
+                .andExpect(status().isNoContent());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select must_change_password from users where id = 5", Boolean.class)).isFalse();
+        assertThat(jdbcTemplate.queryForObject(
+                "select password_hash from users where id = 5", String.class)).isNotEqualTo(originalHash);
+        assertThat(auditCount("USER", "CHANGE_PASSWORD")).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                        "select count(*) from audit_events where entity = 'USER' and action = 'CHANGE_PASSWORD' "
+                                + "and entity_id = 5 and actor_id = 5 and created_at is not null",
+                        Integer.class))
+                .isEqualTo(1);
+
+        mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"emp.jsmith\",\"password\":\"NewPass2\"}"))
+                .andExpect(status().isOk());
+
+        // Self-service changePassword must never call sessionRegistry.revokeAllForUser: the
+        // original session cookie is still valid afterwards, not rejected as unauthorized.
+        mockMvc.perform(post("/auth/logout").cookie(new Cookie("access_token", token)))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void blankCurrentOrNewPasswordIsRejectedWithValidationFailed() throws Exception {
+        String token = loginAndGetToken();
+
+        mockMvc.perform(post("/auth/change-password")
+                        .cookie(new Cookie("access_token", token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"\",\"newPassword\":\"NewPass2\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        mockMvc.perform(post("/auth/change-password")
+                        .cookie(new Cookie("access_token", token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"Passw0rd1\",\"newPassword\":\" \"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        assertThat(auditCount("USER", "CHANGE_PASSWORD")).isZero();
+    }
+
+    @Test
+    void weakNewPasswordIsRejectedWithValidationFailedAndHashUnchanged() throws Exception {
+        String token = loginAndGetToken();
+        String originalHash = jdbcTemplate.queryForObject(
+                "select password_hash from users where id = 5", String.class);
+
+        for (String weakPassword : List.of("short1", "alllettersnodigit", "12345678")) {
+            mockMvc.perform(post("/auth/change-password")
+                            .cookie(new Cookie("access_token", token))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"currentPassword\":\"Passw0rd1\",\"newPassword\":\"" + weakPassword + "\"}"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                    .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        }
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select password_hash from users where id = 5", String.class)).isEqualTo(originalHash);
+        assertThat(auditCount("USER", "CHANGE_PASSWORD")).isZero();
+    }
+
+    @Test
+    void wrongCurrentPasswordIsRejectedWithInvalidCredentialsAndHashUnchanged() throws Exception {
+        String token = loginAndGetToken();
+        String originalHash = jdbcTemplate.queryForObject(
+                "select password_hash from users where id = 5", String.class);
+
+        mockMvc.perform(post("/auth/change-password")
+                        .cookie(new Cookie("access_token", token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"WrongPass1\",\"newPassword\":\"NewPass2\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select password_hash from users where id = 5", String.class)).isEqualTo(originalHash);
+        assertThat(auditCount("USER", "CHANGE_PASSWORD")).isZero();
+    }
+
     private String loginAndGetToken() throws Exception {
         MvcResult result = mockMvc.perform(post("/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -392,13 +493,25 @@ class AuthControllerIntegrationTest {
     }
 
     private int auditCount(String action) {
-        return currentAuditCount(action) - initialAuditCounts.get(action);
+        return auditCount("AUTH", action);
+    }
+
+    private int auditCount(String entity, String action) {
+        return currentAuditCount(entity, action) - initialAuditCounts.get(auditKey(entity, action));
     }
 
     private int currentAuditCount(String action) {
+        return currentAuditCount("AUTH", action);
+    }
+
+    private int currentAuditCount(String entity, String action) {
         return jdbcTemplate.queryForObject(
-                "select count(*) from audit_events where entity = 'AUTH' and action = ? "
+                "select count(*) from audit_events where entity = ? and action = ? "
                         + "and actor_id = 5 and created_at is not null",
-                Integer.class, action);
+                Integer.class, entity, action);
+    }
+
+    private String auditKey(String entity, String action) {
+        return entity + ":" + action;
     }
 }

@@ -53,6 +53,12 @@ class UserControllerIntegrationTest {
     @BeforeEach
     void setUp() {
         jdbcTemplate = new JdbcTemplate(dataSource);
+        jdbcTemplate.update("delete from active_sessions");
+        jdbcTemplate.update(
+                "update users set must_change_password = false, "
+                        + "password_hash = '$2a$10$494KRTD7NLmmrKANwVPvQ.xFiOxOpaw9eS4p3hWmzs8GFT2ssDIri' "
+                        + "where id = ?",
+                EMPLOYEE_ID);
     }
 
     @Test
@@ -238,6 +244,85 @@ class UserControllerIntegrationTest {
                 .andExpect(jsonPath("$[*].role").value(
                         Matchers.everyItem(Matchers.isIn(List.of("MANAGER", "HR_ADMIN")))))
                 .andExpect(jsonPath("$[*].username").value(Matchers.hasItem("mgr.chen")));
+    }
+
+    @Test
+    void hrResetsExistingUserReturns200WithGeneratedPasswordRevokesSessionsAndWritesAudit() throws Exception {
+        jdbcTemplate.update(
+                "insert into active_sessions (token_id, user_id, last_seen_at, expires_at) "
+                        + "values (?, ?, now(), now() + interval '15 minutes')",
+                "reset-password-test-token",
+                EMPLOYEE_ID);
+        String originalHash = jdbcTemplate.queryForObject(
+                "select password_hash from users where id = ?", String.class, EMPLOYEE_ID);
+
+        MvcResult result = mockMvc.perform(post("/users/{userId}/reset-password", EMPLOYEE_ID)
+                        .with(authenticatedAs(HR_ADMIN_ID, "HR_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.temporaryPassword").isNotEmpty())
+                .andReturn();
+
+        String temporaryPassword = com.jayway.jsonpath.JsonPath.read(
+                result.getResponse().getContentAsString(), "$.temporaryPassword");
+        assertThat(temporaryPassword).isNotBlank();
+        assertThat(result.getResponse().getContentAsString()).doesNotContain(originalHash);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select must_change_password from users where id = ?", Boolean.class, EMPLOYEE_ID)).isTrue();
+        String newHash = jdbcTemplate.queryForObject(
+                "select password_hash from users where id = ?", String.class, EMPLOYEE_ID);
+        assertThat(newHash).isNotEqualTo(originalHash).startsWith("$2");
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from active_sessions where user_id = ?", Integer.class, EMPLOYEE_ID))
+                .isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                        "select count(*) from audit_events where entity = 'USER' and action = 'RESET_PASSWORD' "
+                                + "and entity_id = ? and actor_id = ? and created_at is not null",
+                        Integer.class,
+                        EMPLOYEE_ID,
+                        HR_ADMIN_ID))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void hrResetsUnknownUserReturns404WithoutWritingAnyRow() throws Exception {
+        long unknownUserId = 999999L;
+        int auditBefore = jdbcTemplate.queryForObject(
+                "select count(*) from audit_events where entity = 'USER' and action = 'RESET_PASSWORD'",
+                Integer.class);
+
+        mockMvc.perform(post("/users/{userId}/reset-password", unknownUserId)
+                        .with(authenticatedAs(HR_ADMIN_ID, "HR_ADMIN")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from audit_events where entity = 'USER' and action = 'RESET_PASSWORD'",
+                Integer.class)).isEqualTo(auditBefore);
+    }
+
+    @Test
+    void nonHrResetAttemptIsDeniedAndWritesDeniedAccessLogRow() throws Exception {
+        String resource = "POST /api/users/" + EMPLOYEE_ID + "/reset-password";
+        int before = jdbcTemplate.queryForObject(
+                "select count(*) from access_log where resource = ? and actor_id = ? and allowed = false",
+                Integer.class, resource, MANAGER_ID);
+        String originalHash = jdbcTemplate.queryForObject(
+                "select password_hash from users where id = ?", String.class, EMPLOYEE_ID);
+
+        mockMvc.perform(post("/users/{userId}/reset-password", EMPLOYEE_ID)
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER"))
+                        .header("X-Forwarded-Prefix", "/api"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select password_hash from users where id = ?", String.class, EMPLOYEE_ID))
+                .isEqualTo(originalHash);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from access_log where resource = ? and actor_id = ? and allowed = false",
+                Integer.class, resource, MANAGER_ID))
+                .isEqualTo(before + 1);
     }
 
     private RequestPostProcessor authenticatedAs(long actorId, String role) {
