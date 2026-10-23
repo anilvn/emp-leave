@@ -116,6 +116,12 @@ NFR17 (deferred - frontend): responsive desktop-first layout for Chrome and Edge
 
 ### Additional Requirements
 
+**Story implementation workflow (binding for every story):**
+
+- Before implementing a story, explicitly load `backend/AGENTS.md`, read its acceptance criteria and detailed implementation spec when present, and follow the binding Architecture Spine. Resolve open design decisions before coding.
+- Use Lombok for boilerplate in every Java model/POJO, with annotations appropriate to the type; avoid `@Data` on JPA entities unless explicitly justified.
+- Record applicable design patterns and non-obvious coding practices in the story's implementation notes and project context before coding. After completing a story, add its runnable curl examples and expected outcomes to `backend/curl/story-<epic>.<story>-<slug>.md`, following the existing guides, and run them against the local stack when available.
+
 **Starter template:** none. There is no greenfield starter/template to scaffold from - the backend scaffold already exists in the repository (commit `076b1cd`, "Story 1.1 modular backend foundation"), currently just `CompanyLeaveApplication.java`, `application.yml`, an empty `db/migration/` directory, and `openapi.yaml`. Epic 1's first story therefore **extends and corrects the existing scaffold**, it does not initialize a new project.
 
 **Architecture-driven requirements (ADs are binding, not advisory):**

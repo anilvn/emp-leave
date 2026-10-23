@@ -1,0 +1,20 @@
+$kind: http-request
+method: POST
+url: '{{BASE}}/auth/login'
+order: 3000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {"username":"emp.jsmith","password":"Passw0rd1"}
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Login succeeds", () => pm.expect(pm.response.code).to.be.oneOf([200, 204]));
+      const cookie = pm.response.headers.get("Set-Cookie") || "";
+      const match = cookie.match(/access_token=([^;]+)/i);
+      pm.test("Employee access token cookie is returned", () => pm.expect(match).to.not.equal(null));
+      if (match) pm.collectionVariables.set("employeeAccessToken", match[1]);

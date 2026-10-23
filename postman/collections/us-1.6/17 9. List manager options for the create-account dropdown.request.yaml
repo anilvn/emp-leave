@@ -1,0 +1,18 @@
+$kind: http-request
+method: GET
+url: '{{BASE}}/users/managers'
+order: 17000
+headers:
+  - key: Cookie
+    value: 'access_token={{hrAccessToken}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status is 200", () => pm.response.to.have.status(200));
+      pm.test("Response contains manager options", () => {
+        const json = pm.response.json();
+        const list = Array.isArray(json) ? json : (json.content || json.managers);
+        pm.expect(list).to.be.an("array");
+        list.forEach(manager => pm.expect(manager.role).to.eql("MANAGER"));
+      });

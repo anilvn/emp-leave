@@ -1,0 +1,23 @@
+$kind: http-request
+method: POST
+url: '{{BASE}}/users'
+order: 12000
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: Cookie
+    value: 'access_token={{hrAccessToken}}'
+body:
+  type: json
+  content: |-
+    {"username":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","role":"EMPLOYEE","managerId":3,"temporaryPassword":"Temp#2026"}
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status is 400", () => pm.response.to.have.status(400));
+      pm.test("Over-length username is rejected", () => {
+        const json = pm.response.json();
+        pm.expect(json.code).to.eql("VALIDATION_FAILED");
+        pm.expect(json.detail.toLowerCase()).to.include("username");
+      });

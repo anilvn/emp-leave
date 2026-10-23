@@ -1,0 +1,140 @@
+$kind: http-example
+name: 7b. GET /users as EMPLOYEE - expect 403
+request:
+  url: "{{BASE}}/users"
+  method: GET
+  headers:
+    Cookie: access_token={{json_web_token_0q7s}}; Path=/; Max-Age=900; Expires=Fri, 23 Oct 2026 05:26:21 GMT; Secure; HttpOnly; SameSite=Strict
+response:
+  statusCode: 200
+  statusText: ""
+  headers:
+    X-Content-Type-Options: nosniff
+    X-XSS-Protection: "0"
+    Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+    Pragma: no-cache
+    Expires: "0"
+    X-Frame-Options: DENY
+    Content-Type: application/json
+    Transfer-Encoding: chunked
+    Date: Fri, 23 Oct 2026 05:16:30 GMT
+    Keep-Alive: timeout=60
+    Connection: keep-alive
+  body:
+    type: json
+    content: |-
+      [
+        {
+          "active": true,
+          "id": 1,
+          "managerId": null,
+          "mustChangePassword": false,
+          "role": "HR_ADMIN",
+          "username": "hr.admin"
+        },
+        {
+          "active": true,
+          "id": 2,
+          "managerId": 1,
+          "mustChangePassword": false,
+          "role": "MANAGER",
+          "username": "mgr.rossi"
+        },
+        {
+          "active": true,
+          "id": 3,
+          "managerId": 2,
+          "mustChangePassword": false,
+          "role": "MANAGER",
+          "username": "mgr.chen"
+        },
+        {
+          "active": true,
+          "id": 4,
+          "managerId": 2,
+          "mustChangePassword": false,
+          "role": "MANAGER",
+          "username": "mgr.ortiz"
+        },
+        {
+          "active": true,
+          "id": 6,
+          "managerId": 3,
+          "mustChangePassword": false,
+          "role": "EMPLOYEE",
+          "username": "emp.alee"
+        },
+        {
+          "active": true,
+          "id": 7,
+          "managerId": 3,
+          "mustChangePassword": false,
+          "role": "EMPLOYEE",
+          "username": "emp.cwong"
+        },
+        {
+          "active": true,
+          "id": 8,
+          "managerId": 3,
+          "mustChangePassword": false,
+          "role": "EMPLOYEE",
+          "username": "emp.dpatel"
+        },
+        {
+          "active": true,
+          "id": 9,
+          "managerId": 4,
+          "mustChangePassword": false,
+          "role": "EMPLOYEE",
+          "username": "emp.emurphy"
+        },
+        {
+          "active": true,
+          "id": 10,
+          "managerId": 4,
+          "mustChangePassword": false,
+          "role": "EMPLOYEE",
+          "username": "emp.fkim"
+        },
+        {
+          "active": true,
+          "id": 11,
+          "managerId": 4,
+          "mustChangePassword": false,
+          "role": "EMPLOYEE",
+          "username": "emp.gsingh"
+        },
+        {
+          "active": true,
+          "id": 12,
+          "managerId": 4,
+          "mustChangePassword": false,
+          "role": "EMPLOYEE",
+          "username": "emp.hnguyen"
+        },
+        {
+          "active": true,
+          "id": 5,
+          "managerId": 3,
+          "mustChangePassword": false,
+          "role": "EMPLOYEE",
+          "username": "emp.jsmith"
+        },
+        {
+          "active": true,
+          "id": 13,
+          "managerId": 3,
+          "mustChangePassword": true,
+          "role": "EMPLOYEE",
+          "username": "emp.new1"
+        },
+        {
+          "active": true,
+          "id": 14,
+          "managerId": null,
+          "mustChangePassword": true,
+          "role": "HR_ADMIN",
+          "username": "hr.new1"
+        }
+      ]
+order: 1000

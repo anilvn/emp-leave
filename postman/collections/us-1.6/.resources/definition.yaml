@@ -1,0 +1,14 @@
+$kind: collection
+variables:
+  - key: BASE
+    value: http://localhost:8080/
+    disabled: false
+  - key: hrAccessToken
+    value: ""
+    disabled: false
+  - key: employeeAccessToken
+    value: ""
+    disabled: false
+  - key: json_web_token_0q7s
+    secret: true
+    disabled: false
