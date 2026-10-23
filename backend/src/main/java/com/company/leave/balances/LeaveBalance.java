@@ -23,4 +23,16 @@ class LeaveBalance {
 
     @Column(name = "reserved_days", nullable = false)
     private int reservedDays;
+
+    /**
+     * Increases {@code reservedDays} by {@code delta}. The caller must have already
+     * verified that the balance has enough available days; the database CHECK constraint
+     * acts as defence in depth.
+     */
+    void reserveDays(int delta) {
+        if (delta <= 0) {
+            throw new IllegalArgumentException("delta must be positive");
+        }
+        this.reservedDays += delta;
+    }
 }

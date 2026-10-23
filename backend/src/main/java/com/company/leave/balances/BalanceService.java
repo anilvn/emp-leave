@@ -1,24 +1,33 @@
 package com.company.leave.balances;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import com.company.leave.common.ApiException;
+import com.company.leave.common.ErrorCode;
 import com.company.leave.leave.LeaveTypeResponse;
 import com.company.leave.leave.LeaveTypeService;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-/** Reads balances and fills any missing user/type pair with zero days. */
+/** Reads balances, fills missing pairs with zero days, and manages reservations. */
 @Service
 public class BalanceService {
 
     private final LeaveBalanceRepository leaveBalanceRepository;
+    private final BalanceLedgerRepository balanceLedgerRepository;
     private final LeaveTypeService leaveTypeService;
 
-    BalanceService(LeaveBalanceRepository leaveBalanceRepository, LeaveTypeService leaveTypeService) {
+    BalanceService(LeaveBalanceRepository leaveBalanceRepository,
+                   BalanceLedgerRepository balanceLedgerRepository,
+                   LeaveTypeService leaveTypeService) {
         this.leaveBalanceRepository = leaveBalanceRepository;
+        this.balanceLedgerRepository = balanceLedgerRepository;
         this.leaveTypeService = leaveTypeService;
     }
 
@@ -30,6 +39,41 @@ public class BalanceService {
         return leaveTypeService.listLeaveTypes().stream()
                 .map(leaveType -> toBalanceResponse(userId, leaveType, balancesByType.get(leaveType.getId())))
                 .toList();
+    }
+
+    /**
+     * Reserves {@code workingDays} against the user's balance for the given leave type.
+     * Throws {@link ApiException} with {@link ErrorCode#INSUFFICIENT_BALANCE} when available
+     * days are insufficient. Updates {@code reserved_days} and writes a RESERVE ledger row.
+     *
+     * <p>Must be called within an existing transaction so that the request insert, balance
+     * update, ledger row, and audit event all commit or roll back together.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void reserve(long userId, long leaveTypeId, int workingDays, long actorId, long requestId) {
+        LeaveBalanceId balanceId = new LeaveBalanceId(userId, leaveTypeId);
+        LeaveBalance balance = leaveBalanceRepository.findById(balanceId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.CONFLICT, ErrorCode.INSUFFICIENT_BALANCE,
+                        "No balance row exists for userId=" + userId + " leaveTypeId=" + leaveTypeId));
+
+        int available = balance.getTotalDays() - balance.getReservedDays();
+        if (workingDays > available) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.INSUFFICIENT_BALANCE,
+                    "Insufficient balance: requested=" + workingDays
+                            + ", available=" + available
+                            + ", total=" + balance.getTotalDays()
+                            + ", reserved=" + balance.getReservedDays());
+        }
+
+        balance.reserveDays(workingDays);
+        leaveBalanceRepository.save(balance);
+
+        balanceLedgerRepository.save(new BalanceLedger(
+                userId, leaveTypeId, workingDays, LedgerKind.RESERVE,
+                "Leave request " + requestId, actorId, requestId, Instant.now()));
     }
 
     private BalanceResponse toBalanceResponse(long userId, LeaveTypeResponse leaveType, LeaveBalance balance) {

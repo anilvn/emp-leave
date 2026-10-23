@@ -24,4 +24,10 @@ public class LeaveTypeService {
                         .build())
                 .toList();
     }
+
+    /** Returns {@code true} if a leave type with the given id exists. */
+    @Transactional(readOnly = true)
+    public boolean existsById(long leaveTypeId) {
+        return leaveTypeRepository.existsById(leaveTypeId);
+    }
 }

@@ -8,4 +8,6 @@ import org.springframework.data.repository.Repository;
 interface LeaveTypeRepository extends Repository<LeaveType, Long> {
 
     List<LeaveType> findAllByOrderByIdAsc();
+
+    boolean existsById(Long id);
 }

@@ -16,8 +16,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Context-load test proving the backend starts against the database and that Flyway
- * creates its bookkeeping table and the audit, user, session, leave-type, and leave-balance
- * tables from Stories 1.2, 1.3, and 2.1.
+ * creates its bookkeeping table and the audit, user, session, leave-type, leave-balance,
+ * leave-request, and balance-ledger tables from Stories 1.2, 1.3, 2.1, and 2.2.
  */
 @SpringBootTest
 @Testcontainers
@@ -39,7 +39,7 @@ class CompanyLeaveApplicationTests {
 
         assertThat(tables).containsExactlyInAnyOrder(
                 "flyway_schema_history", "audit_events", "access_log", "users", "active_sessions",
-                "leave_types", "leave_balances");
+                "leave_types", "leave_balances", "leave_requests", "balance_ledger");
         assertThat(jdbcTemplate.queryForObject("select count(*) from users", Integer.class)).isEqualTo(12);
     }
 }

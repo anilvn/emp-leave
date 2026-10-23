@@ -188,6 +188,19 @@ public class UserService {
         return userRepository.findAll().stream().map(this::toResponse).toList();
     }
 
+    /**
+     * Returns the user's {@code managerId}, or {@code null} for top-level HR users.
+     * This is the read seam other modules call to set {@code approverId} on a leave
+     * request (AD-2).
+     */
+    @Transactional(readOnly = true)
+    public Long getManagerId(long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND, "User " + userId + " not found."));
+        return user.getManagerId();
+    }
+
     @Transactional(readOnly = true)
     public List<ManagerOptionResponse> listManagerOptions() {
         return userRepository.findByRoleIn(List.of(Role.MANAGER, Role.HR_ADMIN)).stream()
