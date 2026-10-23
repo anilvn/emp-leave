@@ -71,6 +71,25 @@ Existing `access_log` records have no action column, so HTTP method is included 
 **Manual checks:**
 - Search backend controllers and services for role comparisons and `hasRole(...)`; policy decisions must remain centralized, with only filter-chain configuration exempt.
 
+**Results:**
+- `backend\\mvnw.cmd -f backend\\pom.xml test` -- `BUILD SUCCESS`; 30 tests, zero failures, errors, or skips.
+- The backend source search found policy decisions in `AccessPolicy`; `JwtAuthenticationFilter` establishes role authorities and `GlobalExceptionHandler` maps denials. `AuthController.logout` now delegates supported-role authorization to `AccessPolicy`.
+- Proxy-path integration tests verify that requests forwarded with `/api` are audited under their external path, while unauthenticated and public login requests are omitted.
+
 ## Spec Change Log
 
 ## Review Triage Log
+- **medium — patch (fixed), Blind Hunter: policy methods had no production caller.** Source search confirmed no callers; the only existing protected controller action is logout, so it now delegates the supported-role check to `AccessPolicy.requireRole(...)`.
+- **false, Blind Hunter: non-403 responses are logged as allowed.** The configured authorization denial maps to 403; other response failures occur after authentication/authorization and do not represent denied access.
+- **maybe-false — defer, Blind Hunter: multiple numeric path segments.** The filter selects the last numeric segment, but a single `resourceId` cannot be inferred reliably for composite/nested routes without route-specific semantics. See the deferred-work entry.
+- **false, Blind Hunter: audit-write failure can replace request failure.** The filter does not silently serve an authenticated request when the mandatory audit write fails; this fail-closed behavior preserves the audit requirement.
+- **false, Blind Hunter: authenticated public API requests are audited.** The filter now excludes public `POST /api/auth/login`, with an integration assertion that no access-log row is created.
+- **false, Blind Hunter: manager ID may be untrusted.** The policy takes owner and manager IDs as its specified arguments; no caller supplies request-controlled IDs, and the policy does not source resource data itself.
+- **false, Blind Hunter: arbitrary `Number` principal conversion.** Production authentication constructs a `Long` principal in `JwtAuthenticationFilter`; the broader `Number` check does not truncate the configured principal.
+- **false, Blind Hunter: integration denial bypasses `AccessPolicy`.** Policy decisions are covered in unit tests; the integration test verifies the shared `AccessDeniedException` mapping and audit behavior, and no resource-authorization endpoint exists yet.
+- **false, Blind Hunter: public-route test only used health.** The updated integration test also exercises authenticated public login through the forwarded `/api` prefix and verifies omission.
+- **medium — patch (fixed), Blind Hunter: manual verification result was not recorded.** Added the backend search result and test outcome above.
+- **false, Blind Hunter: empty Implementation Notes heading.** An empty optional notes heading does not change behavior or leave an acceptance criterion unmet.
+- **maybe-false — defer, Edge Case Hunter: multiple numeric path segments.** Same unresolved route-to-resource-ID semantics as the Blind Hunter finding; resolving route-specific IDs will settle it.
+- **false, Edge Case Hunter: non-403 responses are logged as allowed.** As above, only the configured 403 outcome denotes access denial; later handler errors do not undo authorization.
+- **medium — patch (fixed), implementation verification: reverse proxy strips `/api/`.** `proxy_pass` rewrites the path before the backend sees it, so the filter previously skipped all proxied API traffic. Nginx now forwards the prefix and the filter reconstructs the external path; integration tests cover the rewritten route and public login exclusion.

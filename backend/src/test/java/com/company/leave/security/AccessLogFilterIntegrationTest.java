@@ -9,6 +9,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
@@ -27,6 +28,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -59,7 +61,9 @@ class AccessLogFilterIntegrationTest {
         long resourceId = System.currentTimeMillis();
         String resource = "GET /api/audit-test/" + resourceId;
 
-        mockMvc.perform(get("/api/audit-test/{id}", resourceId).with(authenticatedAs(actorId)))
+        mockMvc.perform(get("/audit-test/{id}", resourceId)
+                        .with(forwardedApiPrefix())
+                        .with(authenticatedAs(actorId)))
                 .andExpect(status().isOk());
 
         assertThat(countRows(resource)).isEqualTo(1);
@@ -77,7 +81,8 @@ class AccessLogFilterIntegrationTest {
         long resourceId = System.currentTimeMillis();
         String resource = "GET /api/audit-test/denied/" + resourceId;
 
-        mockMvc.perform(get("/api/audit-test/denied/{id}", resourceId)
+        mockMvc.perform(get("/audit-test/denied/{id}", resourceId)
+                        .with(forwardedApiPrefix())
                         .with(authenticatedAs(actorId)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
@@ -96,13 +101,27 @@ class AccessLogFilterIntegrationTest {
         long resourceId = System.currentTimeMillis();
         String resource = "GET /api/audit-test/" + resourceId;
 
-        mockMvc.perform(get("/api/audit-test/{id}", resourceId))
+        mockMvc.perform(get("/audit-test/{id}", resourceId).with(forwardedApiPrefix()))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/actuator/health").with(authenticatedAs(7003L)))
                 .andExpect(status().isOk());
+        mockMvc.perform(post("/auth/login")
+                        .with(forwardedApiPrefix())
+                        .with(authenticatedAs(7004L))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"missing-user\",\"password\":\"NotReal123\"}"))
+                .andExpect(status().isUnauthorized());
 
         assertThat(countRows(resource)).isZero();
         assertThat(countRows("GET /actuator/health")).isZero();
+        assertThat(countRows("POST /api/auth/login")).isZero();
+    }
+
+    private RequestPostProcessor forwardedApiPrefix() {
+        return request -> {
+            request.addHeader("X-Forwarded-Prefix", "/api");
+            return request;
+        };
     }
 
     private RequestPostProcessor authenticatedAs(long actorId) {
@@ -116,7 +135,7 @@ class AccessLogFilterIntegrationTest {
     }
 
     @RestController
-    @RequestMapping("/api/audit-test")
+    @RequestMapping("/audit-test")
     static class TestController {
 
         @GetMapping("/{id}")

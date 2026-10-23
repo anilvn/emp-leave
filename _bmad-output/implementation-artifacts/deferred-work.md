@@ -13,3 +13,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-3-password-login-idle-expiring-session.md`
   summary: Revisit CSRF/origin protections for cookie-authenticated endpoints when the trusted-origin and deployment threat model is defined.
   evidence: `SameSite=Strict` blocks cross-site requests but not requests from an untrusted sibling subdomain. The frozen story intent explicitly excludes a CSRF token scheme and accepts `SameSite=Strict` for this POC, so additional protection needs a broader trusted-origin decision.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-5-one-permission-layer-for-every-endpoint.md`
+  summary: Define how the access log selects one `resourceId` for routes containing multiple numeric path segments.
+  evidence: `AccessLogFilter` currently selects the last numeric segment, but composite/nested route shapes can contain multiple IDs and the story does not define which one is the audited resource. Route-specific semantics are needed to settle the correct value without misattributing access.

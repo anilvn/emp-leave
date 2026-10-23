@@ -31,7 +31,7 @@ public class AccessLogFilter extends OncePerRequestFilter {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         Long actorId = authenticatedUserId(authentication);
         String path = requestPath(request);
-        if (actorId == null || !isApiPath(path)) {
+        if (actorId == null || !isApiPath(path) || isPublicApiRequest(request.getMethod(), path)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -58,13 +58,22 @@ public class AccessLogFilter extends OncePerRequestFilter {
     private String requestPath(HttpServletRequest request) {
         String requestUri = request.getRequestURI();
         String contextPath = request.getContextPath();
-        return contextPath != null && !contextPath.isEmpty() && requestUri.startsWith(contextPath)
+        String path = contextPath != null && !contextPath.isEmpty() && requestUri.startsWith(contextPath)
                 ? requestUri.substring(contextPath.length())
                 : requestUri;
+        String forwardedPrefix = request.getHeader("X-Forwarded-Prefix");
+        if ("/api".equals(forwardedPrefix) && !isApiPath(path)) {
+            return forwardedPrefix + (path.startsWith("/") ? path : "/" + path);
+        }
+        return path;
     }
 
     private boolean isApiPath(String path) {
         return "/api".equals(path) || path.startsWith("/api/");
+    }
+
+    private boolean isPublicApiRequest(String method, String path) {
+        return "POST".equalsIgnoreCase(method) && "/api/auth/login".equals(path);
     }
 
     private Long numericPathId(String path) {

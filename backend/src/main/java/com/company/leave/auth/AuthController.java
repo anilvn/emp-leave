@@ -6,8 +6,10 @@ import jakarta.validation.Valid;
 import com.company.leave.audit.AuditService;
 import com.company.leave.common.ApiException;
 import com.company.leave.common.ErrorCode;
+import com.company.leave.security.AccessPolicy;
 import com.company.leave.security.JwtService;
 import com.company.leave.security.SessionRegistry;
+import com.company.leave.users.Role;
 import com.company.leave.users.UserAccount;
 import com.company.leave.users.UserService;
 import org.springframework.http.HttpHeaders;
@@ -32,16 +34,19 @@ public class AuthController {
     private final SessionRegistry sessionRegistry;
     private final JwtService jwtService;
     private final AuditService auditService;
+    private final AccessPolicy accessPolicy;
 
     AuthController(
             UserService userService,
             SessionRegistry sessionRegistry,
             JwtService jwtService,
-            AuditService auditService) {
+            AuditService auditService,
+            AccessPolicy accessPolicy) {
         this.userService = userService;
         this.sessionRegistry = sessionRegistry;
         this.jwtService = jwtService;
         this.auditService = auditService;
+        this.accessPolicy = accessPolicy;
     }
 
     @PostMapping("/login")
@@ -68,6 +73,7 @@ public class AuthController {
 
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(Authentication authentication) {
+        accessPolicy.requireRole(Role.EMPLOYEE, Role.MANAGER, Role.HR_ADMIN);
         long userId = (Long) authentication.getPrincipal();
         sessionRegistry.revokeAllForUser(userId);
         ResponseCookie cookie = ResponseCookie.from(ACCESS_TOKEN_COOKIE, "")
