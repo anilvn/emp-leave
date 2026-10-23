@@ -1,0 +1,14 @@
+$kind: http-request
+description: "Generated from cURL: curl -X 'GET' \\\r
+
+  \  'http://localhost:8080/balances/me' \\\r
+
+  \  -H 'accept: */*' \\\r
+
+  \  -H 'Cookie: access_token={{json_web_token_0hxb}}'"
+url: http://localhost:8080/balances/me
+method: GET
+headers:
+  accept: "*/*"
+  Cookie: "{{json_web_token_08hr}}"
+order: 9000

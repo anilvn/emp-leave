@@ -25,7 +25,8 @@ method: POST
 headers:
   accept: "*/*"
   Content-Type: application/json
-  Cookie: access_token={{json_web_token_0hxb}}
+  Cookie: |
+    {{json_web_token_1cjy}}
 body:
   type: json
   content: "{\r
@@ -39,4 +40,4 @@ body:
     \  \"notes\": \"Family trip\"\r
 
     }"
-order: 6000
+order: 7000

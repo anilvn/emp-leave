@@ -72,14 +72,21 @@ Implemented the V12 schema, notification service/API, template renderer, request
 
 ## Spec Change Log
 
+| Date | Change |
+|------|--------|
+| 2026-10-23 | Recorded final review triage and implementation commit. |
+
 ## Review Triage Log
 
 | # | Source | Claim | Verdict | Evidence | Route |
 |---|---|---|---|---|---|
 | 1 | verification-gap | Successful dispatch did not assert rendered body appears in logs | low | The service logs the rendered body; integration coverage now captures output and asserts the working-day count and request link. | patch |
 | 2 | verification-gap | Notification-write failure did not assert ERROR logging | low | The failure path logs at ERROR; the integration test now captures and asserts the error message and injected database failure. | patch |
+| 3 | edge-case-hunter | Rendered-body logging lacked a direct assertion | duplicate | Covered by row 1; integration coverage now captures output and asserts the working-day count and request link. | no change |
 
 ## Verification
 
 **Commands:**
 - `backend\mvnw.cmd -f backend\pom.xml test` — all 84 tests pass.
+
+**Commit:** `61ec86ff875ac1371086d991f43750acc5589cc5` (`feat(notifications): add submission alerts and history`).
