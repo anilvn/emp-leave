@@ -21,7 +21,7 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/leave
       DB_USERNAME: ${DB_USERNAME:-leave}
       DB_PASSWORD: ${DB_PASSWORD:-leave}
-      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - copy .env.example to .env and set a value (NFR8)}
     depends_on:
       postgres:
         condition: service_healthy

@@ -90,7 +90,7 @@ class AuthControllerIntegrationTest {
                 .contains("HttpOnly")
                 .contains("Secure")
                 .contains("SameSite=Strict")
-                .contains("Max-Age=900");
+                .contains("Max-Age=1800");
         String token = cookieHeader.substring("access_token=".length(), cookieHeader.indexOf(';'));
         JwtService.ParsedToken parsed = jwtService.parseAndValidate(token);
         assertThat(parsed.userId()).isEqualTo(5L);
@@ -314,6 +314,34 @@ class AuthControllerIntegrationTest {
                 "select count(*) from active_sessions where token_id = ?", Integer.class, tokenId)).isEqualTo(1);
         assertThat(auditCount("LOGIN")).isEqualTo(1);
         assertThat(auditCount("LOGOUT")).isZero();
+    }
+
+    @Test
+    void sessionActiveBeyondTokenLifetimeButWithinIdleWindowIsAcceptedAndSlid() throws Exception {
+        String token = loginAndGetToken();
+        String tokenId = jwtService.parseAndValidate(token).tokenId();
+        // 20 minutes since last activity: past the former 15-minute cap, inside the 30-minute idle window.
+        jdbcTemplate.update(
+                "update active_sessions set last_seen_at = now() - interval '20 minutes', "
+                        + "expires_at = now() + interval '10 minutes' where token_id = ?",
+                tokenId);
+
+        MvcResult result = mockMvc.perform(get("/not-a-real-endpoint").cookie(new Cookie("access_token", token)))
+                .andExpect(status().isNotFound())
+                .andReturn();
+
+        assertThat(result.getResponse().getHeader("Set-Cookie"))
+                .as("sliding re-issue on an active request")
+                .contains("access_token=")
+                .contains("Max-Age=1800");
+        assertThat(jdbcTemplate.queryForObject(
+                        "select expires_at > now() + interval '25 minutes' from active_sessions where token_id = ?",
+                        Boolean.class, tokenId))
+                .isTrue();
+        assertThat(jdbcTemplate.queryForObject(
+                        "select last_seen_at > now() - interval '1 minute' from active_sessions where token_id = ?",
+                        Boolean.class, tokenId))
+                .isTrue();
     }
 
     @Test

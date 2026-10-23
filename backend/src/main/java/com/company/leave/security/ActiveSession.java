@@ -34,4 +34,8 @@ class ActiveSession {
     void touch(Instant now) {
         lastSeenAt = now;
     }
+
+    void slideExpiry(Instant expiresAt) {
+        this.expiresAt = expiresAt;
+    }
 }

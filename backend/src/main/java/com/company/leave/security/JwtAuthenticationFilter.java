@@ -9,12 +9,15 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import io.jsonwebtoken.JwtException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
+
+    private static final String LOGOUT_PATH = "/auth/logout";
 
     private final JwtService jwtService;
     private final SessionRegistry sessionRegistry;
@@ -38,12 +41,37 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                             null,
                             List.of(new SimpleGrantedAuthority("ROLE_" + parsed.role())));
                     SecurityContextHolder.getContext().setAuthentication(authentication);
+                    slideCookie(request, response, parsed);
                 }
             } catch (JwtException ignored) {
                 SecurityContextHolder.clearContext();
             }
         }
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * Re-issues a fresh token cookie so the 30-minute window tracks activity rather than login
+     * time (FR58, AD-8). The same {@code token_id} is reused, keeping the session row stable.
+     * Logout is skipped so its clearing cookie is the only one returned.
+     */
+    private void slideCookie(
+            HttpServletRequest request, HttpServletResponse response, JwtService.ParsedToken parsed) {
+        if (LOGOUT_PATH.equals(requestPath(request))) {
+            return;
+        }
+        String refreshed = jwtService.issue(parsed.userId(), parsed.role(), parsed.tokenId());
+        response.addHeader(
+                HttpHeaders.SET_COOKIE,
+                AuthCookies.issue(refreshed, JwtService.TOKEN_LIFETIME).toString());
+    }
+
+    private String requestPath(HttpServletRequest request) {
+        String requestUri = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        return contextPath != null && !contextPath.isEmpty() && requestUri.startsWith(contextPath)
+                ? requestUri.substring(contextPath.length())
+                : requestUri;
     }
 
     private String accessToken(HttpServletRequest request) {

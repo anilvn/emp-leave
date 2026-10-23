@@ -15,6 +15,15 @@ import org.springframework.stereotype.Service;
 @Service
 public class JwtService {
 
+    /**
+     * Token lifetime, matched to the {@link SessionRegistry#IDLE_TIMEOUT 30-minute idle window}:
+     * the token must stay valid across an allowed idle gap, and {@link JwtAuthenticationFilter}
+     * re-issues it on every authenticated request so an active user is never cut off early (FR58,
+     * AD-8). This supersedes AD-7's original 15-minute figure, which could not coexist with a
+     * 30-minute idle timeout without a refresh step.
+     */
+    public static final Duration TOKEN_LIFETIME = Duration.ofMinutes(30);
+
     private final SecretKey key;
 
     JwtService(@Value("${security.jwt.secret}") String secret) {
@@ -22,7 +31,7 @@ public class JwtService {
     }
 
     public String issue(long userId, String role, String tokenId) {
-        return issue(userId, role, tokenId, Duration.ofMinutes(15));
+        return issue(userId, role, tokenId, TOKEN_LIFETIME);
     }
 
     String issue(long userId, String role, String tokenId, Duration lifetime) {

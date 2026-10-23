@@ -11,7 +11,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class SessionRegistry {
 
     static final Duration IDLE_TIMEOUT = Duration.ofMinutes(30);
-    static final Duration TOKEN_LIFETIME = Duration.ofMinutes(15);
 
     private final ActiveSessionRepository activeSessionRepository;
 
@@ -24,7 +23,7 @@ public class SessionRegistry {
         String tokenId = UUID.randomUUID().toString();
         Instant now = Instant.now();
         activeSessionRepository.deleteByExpiresAtBefore(now);
-        activeSessionRepository.save(new ActiveSession(tokenId, userId, now, now.plus(TOKEN_LIFETIME)));
+        activeSessionRepository.save(new ActiveSession(tokenId, userId, now, now.plus(IDLE_TIMEOUT)));
         return tokenId;
     }
 
@@ -37,7 +36,9 @@ public class SessionRegistry {
                             && Duration.between(session.getLastSeenAt(), now).compareTo(IDLE_TIMEOUT) <= 0;
                 })
                 .map(session -> {
-                    session.touch(Instant.now());
+                    Instant now = Instant.now();
+                    session.touch(now);
+                    session.slideExpiry(now.plus(IDLE_TIMEOUT));
                     activeSessionRepository.save(session);
                     return true;
                 })
