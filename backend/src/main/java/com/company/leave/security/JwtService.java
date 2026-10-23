@@ -38,6 +38,9 @@ public class JwtService {
     }
 
     public ParsedToken parseAndValidate(String token) {
+        if (token == null || token.isBlank()) {
+            throw new JwtException("JWT must not be empty");
+        }
         var claims = Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload();
         try {
             long userId = Long.parseLong(claims.getSubject());

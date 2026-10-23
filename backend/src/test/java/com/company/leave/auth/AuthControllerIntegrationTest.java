@@ -314,6 +314,14 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
+    void emptyAccessTokenCookieIsRejectedAsUnauthenticated() throws Exception {
+        mockMvc.perform(post("/auth/logout").cookie(new Cookie("access_token", "")))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(auditCount("LOGOUT")).isZero();
+    }
+
+    @Test
     void logoutRevokesAllUserSessionsClearsCookieAndRejectsOldTokens() throws Exception {
         String firstToken = loginAndGetToken();
         String secondToken = loginAndGetToken();
