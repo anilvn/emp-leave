@@ -59,6 +59,7 @@ class BalanceControllerIntegrationTest {
         jdbcTemplate = new JdbcTemplate(dataSource);
         jdbcTemplate.update("delete from active_sessions");
         jdbcTemplate.update("update users set must_change_password = false where id = 5");
+        jdbcTemplate.update("delete from balance_ledger");
     }
 
     @AfterEach
@@ -497,6 +498,80 @@ class BalanceControllerIntegrationTest {
                         .content("{\"reason\":\"Missing changeDays field\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    // --- Story 4.4: GET /balances/{userId}/{leaveTypeId}/ledger ---
+
+    @Test
+    void hrCanGetLedgerForUserAndLeaveType() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+
+        // set then adjust so the ledger has two rows in order
+        mockMvc.perform(put("/balances/{userId}/{typeId}", 5L, vacationTypeId)
+                        .with(authenticatedAs(1L, "HR_ADMIN"))
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"totalDays\":25,\"reason\":\"Annual allocation\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/balances/{userId}/{typeId}/adjust", 5L, vacationTypeId)
+                        .with(authenticatedAs(1L, "HR_ADMIN"))
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"changeDays\":3,\"reason\":\"Carryover\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/balances/{userId}/{typeId}/ledger", 5L, vacationTypeId)
+                        .with(authenticatedAs(1L, "HR_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].kind").value("SET"))
+                .andExpect(jsonPath("$[0].userId").value(5))
+                .andExpect(jsonPath("$[0].leaveTypeId").value((int) vacationTypeId))
+                .andExpect(jsonPath("$[0].changeDays").value(5))
+                .andExpect(jsonPath("$[0].actorId").value(1))
+                .andExpect(jsonPath("$[0].reason").value("Annual allocation"))
+                .andExpect(jsonPath("$[0].requestId").value(Matchers.nullValue()))
+                .andExpect(jsonPath("$[1].kind").value("ADJUST"))
+                .andExpect(jsonPath("$[1].changeDays").value(3))
+                .andExpect(jsonPath("$[1].reason").value("Carryover"))
+                .andExpect(jsonPath("$[1].requestId").value(Matchers.nullValue()));
+    }
+
+    @Test
+    void ledgerIsEmptyArrayWhenNoHistory() throws Exception {
+        long sickTypeId = leaveTypeId("Sick");
+
+        mockMvc.perform(get("/balances/{userId}/{typeId}/ledger", 5L, sickTypeId)
+                        .with(authenticatedAs(1L, "HR_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    void employeeCallerGets403ForLedger() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+
+        mockMvc.perform(get("/balances/{userId}/{typeId}/ledger", 5L, vacationTypeId)
+                        .with(authenticatedAs(5L, "EMPLOYEE")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+    }
+
+    @Test
+    void managerCallerGets403ForLedger() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+
+        mockMvc.perform(get("/balances/{userId}/{typeId}/ledger", 5L, vacationTypeId)
+                        .with(authenticatedAs(3L, "MANAGER")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+    }
+
+    @Test
+    void unauthenticatedCallerGets401ForLedger() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+
+        mockMvc.perform(get("/balances/{userId}/{typeId}/ledger", 5L, vacationTypeId))
+                .andExpect(status().isUnauthorized());
     }
 
     private long leaveTypeId(String name) {

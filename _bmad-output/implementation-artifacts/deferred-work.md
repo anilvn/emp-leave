@@ -115,6 +115,14 @@
   summary: Align the user-owned Postman history request description and body with its GET operation.
   evidence: The in-progress Story 3.1 collection change updates the history route to GET but retains a generated POST-submission description and a JSON edit body.
 
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-4-the-ledger-behind-a-balance.md`
+  summary: Define the documented behavior and add a test when `GET /api/balances/{userId}/{leaveTypeId}/ledger` is called for a non-existent userId or leaveTypeId.
+  evidence: `getLedger` currently returns `[]` for any userId/leaveTypeId pair that has no ledger rows, making "unknown user" indistinguishable from "user with no history". All other balance read endpoints share this pattern (e.g., `getBalancesForUser` returns empty arrays for phantom users), so this is a pre-existing architecture-level scope decision rather than a defect in Story 4.4.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-4-the-ledger-behind-a-balance.md`
+  summary: Add pagination or a documented upper bound to `GET /api/balances/{userId}/{leaveTypeId}/ledger` for users with long histories.
+  evidence: The endpoint returns all rows unbounded. A user with many years of RESERVE/RELEASE/DEDUCT events can accumulate a large result set. The openapi spec defines no pagination contract for this operation and FR30 does not require one, so this is a future architectural decision rather than a defect in this story.
+
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-3-hr-adjusts-a-balance-up-or-down.md`
   summary: Test that `adjustBalance` correctly creates a new balance row when none exists for the given user/leaveType pair.
   evidence: `BalanceService.adjustBalance` uses `orElse(new LeaveBalance(balanceId, 0))` like `setBalance`, so a positive adjustment on a user with no existing balance row should insert a new row; untested because all 12 seeded users already have all 4 leave type rows. Failure mode (maybe-false): if a DB FK constraint on `leave_balances` were violated, only production traffic or a test that deletes the row first would reveal it.

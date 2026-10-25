@@ -113,6 +113,25 @@ public class BalanceController {
     }
 
     @Operation(
+            summary = "Balance ledger history",
+            description = "HR_ADMIN only. Every balance_ledger row for this user and leave type — "
+                    + "set, adjust, reserve, release, deduct — oldest first (FR30).")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Ledger entries for this user/leave type, oldest first"),
+        @ApiResponse(responseCode = "401", description = "No valid access_token cookie"),
+        @ApiResponse(responseCode = "403", description = "Caller is not HR_ADMIN",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @GetMapping("/{userId}/{leaveTypeId}/ledger")
+    public ResponseEntity<List<BalanceLedgerEntryResponse>> getLedger(
+            @PathVariable long userId,
+            @PathVariable long leaveTypeId) {
+        accessPolicy.requireRole(Role.HR_ADMIN);
+        return ResponseEntity.ok(balanceService.getLedger(userId, leaveTypeId));
+    }
+
+    @Operation(
             summary = "Get my leave balances",
             description = "Available to employees, managers and HR administrators. Returns every leave type; "
                     + "a missing balance row is returned with zero day counts.")

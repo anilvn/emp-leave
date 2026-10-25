@@ -281,6 +281,25 @@ public class BalanceService {
     }
 
     @Transactional(readOnly = true)
+    public List<BalanceLedgerEntryResponse> getLedger(long userId, long leaveTypeId) {
+        return balanceLedgerRepository
+                .findByUserIdAndLeaveTypeIdOrderByCreatedAtAsc(userId, leaveTypeId)
+                .stream()
+                .map(e -> BalanceLedgerEntryResponse.builder()
+                        .id(e.getId())
+                        .userId(e.getUserId())
+                        .leaveTypeId(e.getLeaveTypeId())
+                        .changeDays(e.getChangeDays())
+                        .kind(e.getKind())
+                        .reason(e.getReason())
+                        .actorId(e.getActorId())
+                        .requestId(e.getRequestId())
+                        .createdAt(e.getCreatedAt())
+                        .build())
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<BalanceResponse> getAllBalances(Long userId) {
         List<LeaveBalance> rows = userId != null
                 ? leaveBalanceRepository.findForUser(userId)
