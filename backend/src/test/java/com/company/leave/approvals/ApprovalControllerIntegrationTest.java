@@ -6,6 +6,7 @@ import java.util.List;
 import javax.sql.DataSource;
 
 import com.jayway.jsonpath.JsonPath;
+import com.company.leave.leave.LeaveRequestService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +25,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -50,6 +52,9 @@ class ApprovalControllerIntegrationTest {
 
     @Autowired
     private DataSource dataSource;
+
+    @Autowired
+    private LeaveRequestService leaveRequestService;
 
     private JdbcTemplate jdbcTemplate;
 
@@ -282,6 +287,220 @@ class ApprovalControllerIntegrationTest {
     }
 
     @Test
+    void assignedManagerCanRejectWithReasonAndAllEffectsAreCommitted() throws Exception {
+        long vacationId = leaveTypeId("Vacation");
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, vacationId, "2026-10-29", "2026-11-03");
+        reserve(EMPLOYEE_ID, vacationId, 4);
+        String reason = "Please resubmit after the month-end close.";
+
+        mockMvc.perform(post("/approvals/{requestId}/reject", requestId)
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"comment\":\"" + reason + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(requestId))
+                .andExpect(jsonPath("$.status").value("REJECTED"))
+                .andExpect(jsonPath("$.approverId").value(MANAGER_ID))
+                .andExpect(jsonPath("$.decidedAt").isNotEmpty())
+                .andExpect(jsonPath("$.decisionComment").value(reason));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select status from leave_requests where id = ?", String.class, requestId)).isEqualTo("REJECTED");
+        assertThat(jdbcTemplate.queryForObject(
+                "select decision_comment from leave_requests where id = ?", String.class, requestId))
+                .isEqualTo(reason);
+        assertBalance(EMPLOYEE_ID, vacationId, 20, 0);
+        assertThat(jdbcTemplate.queryForObject("""
+                select total_days - reserved_days from leave_balances
+                 where user_id = ? and leave_type_id = ?
+                """, Integer.class, EMPLOYEE_ID, vacationId)).isEqualTo(20);
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from balance_ledger
+                 where request_id = ? and kind = 'RELEASE' and change_days = -4
+                   and actor_id = ? and reason = ?
+                """, Long.class, requestId, MANAGER_ID, "Rejected leave request " + requestId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from audit_events
+                 where entity = 'LEAVE_REQUEST' and entity_id = ?
+                   and action = 'LEAVE_REQUEST_REJECTED' and actor_id = ?
+                   and details_json ->> 'detail' = ?
+                """, Long.class, requestId, MANAGER_ID, reason)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from notifications
+                 where user_id = ? and request_id = ? and kind = 'REJECTED'
+                """, Long.class, EMPLOYEE_ID, requestId)).isEqualTo(1);
+
+        mockMvc.perform(get("/requests/{requestId}/history", requestId)
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].type").value("REJECTED"))
+                .andExpect(jsonPath("$[0].detail").value(reason));
+        mockMvc.perform(get("/requests/{requestId}", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"))
+                .andExpect(jsonPath("$.decisionComment").value(reason));
+    }
+
+    @Test
+    void rejectionRequiresANonBlankCommentWithoutChangingData() throws Exception {
+        long vacationId = leaveTypeId("Vacation");
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, vacationId, "2026-10-29", "2026-11-03");
+        reserve(EMPLOYEE_ID, vacationId, 4);
+
+        mockMvc.perform(post("/approvals/{requestId}/reject", requestId)
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER"))
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMENT_REQUIRED"));
+        mockMvc.perform(post("/approvals/{requestId}/reject", requestId)
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"comment\":null}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMENT_REQUIRED"));
+        mockMvc.perform(post("/approvals/{requestId}/reject", requestId)
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"comment\":\"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMENT_REQUIRED"));
+        mockMvc.perform(post("/approvals/{requestId}/reject", requestId)
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"comment\":\" \\t \"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMENT_REQUIRED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select status from leave_requests where id = ?", String.class, requestId)).isEqualTo("PENDING");
+        assertBalance(EMPLOYEE_ID, vacationId, 20, 4);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from balance_ledger where request_id = ?", Long.class, requestId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from audit_events where entity_id = ? and action = 'LEAVE_REQUEST_REJECTED'",
+                Long.class, requestId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from notifications where request_id = ?", Long.class, requestId)).isZero();
+    }
+
+    @Test
+    void rejectionUsesAssignedApproverAndPendingStateGuards() throws Exception {
+        long vacationId = leaveTypeId("Vacation");
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, vacationId, "2026-10-29", "2026-11-03");
+        reserve(EMPLOYEE_ID, vacationId, 4);
+
+        mockMvc.perform(post("/approvals/{requestId}/reject", requestId)
+                        .header("X-Forwarded-Prefix", "/api")
+                        .with(authenticatedAs(OTHER_MANAGER_ID, "MANAGER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"comment\":\"Not my request.\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+        mockMvc.perform(post("/approvals/{requestId}/reject", requestId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"comment\":\"Unauthenticated.\"}"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/approvals/{requestId}/reject", 999999L)
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"comment\":\"Unknown request.\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+        jdbcTemplate.update("update leave_requests set status = 'APPROVED' where id = ?", requestId);
+        mockMvc.perform(post("/approvals/{requestId}/reject", requestId)
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"comment\":\"Already decided.\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("INVALID_TRANSITION"))
+                .andExpect(jsonPath("$.detail").value(
+                        "Request " + requestId + " is APPROVED and can no longer be rejected."));
+
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from access_log
+                 where actor_id = ? and resource_id = ? and allowed = false
+                   and resource like '%/reject'
+                """, Long.class, OTHER_MANAGER_ID, requestId)).isEqualTo(1);
+        assertBalance(EMPLOYEE_ID, vacationId, 20, 4);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from balance_ledger where request_id = ?", Long.class, requestId)).isZero();
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from audit_events
+                 where entity_id = ? and action = 'LEAVE_REQUEST_REJECTED'
+                """, Long.class, requestId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from notifications where request_id = ?", Long.class, requestId)).isZero();
+    }
+
+    @Test
+    void unsupportedDecisionCannotRejectWithoutAReason() {
+        long vacationId = leaveTypeId("Vacation");
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, vacationId, "2026-10-29", "2026-11-03");
+        reserve(EMPLOYEE_ID, vacationId, 4);
+
+        assertThatThrownBy(() -> leaveRequestService.applyDecision(requestId, null, null, MANAGER_ID))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Unsupported decision: null");
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select status from leave_requests where id = ?", String.class, requestId)).isEqualTo("PENDING");
+        assertBalance(EMPLOYEE_ID, vacationId, 20, 4);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from balance_ledger where request_id = ?", Long.class, requestId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from audit_events where entity_id = ? and action = 'LEAVE_REQUEST_REJECTED'",
+                Long.class, requestId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from notifications where request_id = ?", Long.class, requestId)).isZero();
+    }
+
+    @Test
+    void rejectionNotificationFailureDoesNotUndoCommittedDecision() throws Exception {
+        long vacationId = leaveTypeId("Vacation");
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, vacationId, "2026-10-29", "2026-11-03");
+        reserve(EMPLOYEE_ID, vacationId, 4);
+        jdbcTemplate.execute("""
+                create function fail_rejected_notification() returns trigger as $$
+                begin
+                    if new.kind = 'REJECTED' then
+                        raise exception 'forced notification failure';
+                    end if;
+                    return new;
+                end;
+                $$ language plpgsql
+                """);
+        jdbcTemplate.execute("""
+                create trigger fail_rejected_notification
+                before insert on notifications
+                for each row execute function fail_rejected_notification()
+                """);
+
+        try {
+            mockMvc.perform(post("/approvals/{requestId}/reject", requestId)
+                            .with(authenticatedAs(MANAGER_ID, "MANAGER"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"comment\":\"Please resubmit later.\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("REJECTED"));
+        } finally {
+            jdbcTemplate.execute("drop trigger if exists fail_rejected_notification on notifications");
+            jdbcTemplate.execute("drop function if exists fail_rejected_notification()");
+        }
+
+        assertBalance(EMPLOYEE_ID, vacationId, 20, 0);
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from audit_events
+                 where entity_id = ? and action = 'LEAVE_REQUEST_REJECTED'
+                """, Long.class, requestId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from balance_ledger where request_id = ? and kind = 'RELEASE'
+                """, Long.class, requestId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from notifications where request_id = ?", Long.class, requestId)).isZero();
+    }
+
+    @Test
     void hrCanApproveOwnAssignedRequestWithoutComment() throws Exception {
         long vacationId = leaveTypeId("Vacation");
         long requestId = insertRequest(HR_ID, HR_ID, vacationId, "2026-11-02", "2026-11-05");
@@ -356,7 +575,9 @@ class ApprovalControllerIntegrationTest {
         mockMvc.perform(post("/approvals/{requestId}/approve", requestId)
                         .with(authenticatedAs(MANAGER_ID, "MANAGER")))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("INVALID_TRANSITION"));
+                .andExpect(jsonPath("$.code").value("INVALID_TRANSITION"))
+                .andExpect(jsonPath("$.detail").value(
+                        "Request " + requestId + " is APPROVED and can no longer be approved."));
 
         assertBalance(EMPLOYEE_ID, vacationId, 20, 4);
         assertThat(jdbcTemplate.queryForObject(

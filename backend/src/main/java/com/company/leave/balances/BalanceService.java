@@ -121,7 +121,7 @@ public class BalanceService {
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public void releaseReservation(long userId, long leaveTypeId, int workingDays,
-                                   long actorId, long requestId) {
+                                   long actorId, long requestId, String reason) {
         if (workingDays <= 0) {
             throw new IllegalArgumentException("workingDays must be positive");
         }
@@ -145,7 +145,7 @@ public class BalanceService {
 
         balanceLedgerRepository.save(new BalanceLedger(
                 userId, leaveTypeId, -workingDays, LedgerKind.RELEASE,
-                "Cancelled leave request " + requestId, actorId, requestId, Instant.now()));
+                reason, actorId, requestId, Instant.now()));
     }
 
     /**

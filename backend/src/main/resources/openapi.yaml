@@ -905,7 +905,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DecisionRequest'
+              $ref: '#/components/schemas/RejectDecisionRequest'
             example:
               comment: Please resubmit after the month-end close on Nov 10 — this week is too close to the deadline.
       responses:
@@ -928,6 +928,8 @@ paths:
                 submittedAt: "2026-10-22T09:15:00Z"
                 decidedAt: "2026-10-23T08:50:00Z"
                 decisionComment: Please resubmit after the month-end close on Nov 10 — this week is too close to the deadline.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '400':
           description: Comment missing or blank (FR13)
           content:
@@ -954,6 +956,8 @@ paths:
                 detail: You are not the approver for request 101.
                 instance: /api/approvals/101/reject
                 code: ACCESS_DENIED
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           description: Request is no longer PENDING
           content:
@@ -2230,15 +2234,27 @@ components:
 
     DecisionRequest:
       type: object
-      description: >
-        Body for approve/reject. comment is optional on approve, required
-        and non-blank on reject (FR12, FR13).
+      description: Body for approval; comment is optional (FR12).
       properties:
         comment:
           type: string
           nullable: true
       example:
         comment: Enjoy your trip!
+
+    RejectDecisionRequest:
+      type: object
+      description: Body for rejection; comment is required and non-blank (FR13).
+      required:
+        - comment
+      properties:
+        comment:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+          description: A non-blank reason for rejecting the request.
+      example:
+        comment: Please resubmit with dates after the month-end close.
 
     TeamLeaveEntry:
       type: object

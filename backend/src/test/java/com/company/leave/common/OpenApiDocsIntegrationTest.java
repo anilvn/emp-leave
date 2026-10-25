@@ -88,11 +88,30 @@ class OpenApiDocsIntegrationTest {
                 .andExpect(jsonPath("$.paths['/approvals/{requestId}/approve'].post.requestBody.content"
                         + "['application/json'].schema.$ref")
                         .value("#/components/schemas/DecisionRequest"))
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/reject'].post").exists())
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/reject'].post.responses['200']").exists())
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/reject'].post.responses['400']").exists())
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/reject'].post.responses['401']").exists())
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/reject'].post.responses['401']"
+                        + ".content['application/problem+json'].schema").exists())
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/reject'].post.responses['403']").exists())
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/reject'].post.responses['404']").exists())
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/reject'].post.responses['409']").exists())
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/reject'].post.requestBody.required")
+                        .value(true))
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/reject'].post.requestBody.content"
+                        + "['application/json'].schema.$ref")
+                        .value("#/components/schemas/RejectDecisionRequest"))
                 .andExpect(jsonPath("$.paths['/approvals/{requestId}/approve'].post.responses['200']"
                         + ".content['application/json'].schema.$ref")
                         .value("#/components/schemas/LeaveRequest"))
                 .andExpect(jsonPath("$.components.schemas.DecisionRequest.properties.comment").exists())
                 .andExpect(jsonPath("$.components.schemas.DecisionRequest.required").doesNotExist())
+                .andExpect(jsonPath("$.components.schemas.RejectDecisionRequest.required[0]").value("comment"))
+                .andExpect(jsonPath("$.components.schemas.RejectDecisionRequest.properties.comment.minLength")
+                        .value(1))
+                .andExpect(jsonPath("$.components.schemas.RejectDecisionRequest.properties.comment.pattern")
+                        .value(".*\\S.*"))
                 .andExpect(jsonPath("$.components.schemas.ApprovalDetail.properties.employeeUsername.type")
                         .value("string"))
                 .andExpect(jsonPath("$.components.schemas.ApprovalDetail.properties.status.enum[0]")
@@ -256,7 +275,7 @@ class OpenApiDocsIntegrationTest {
     }
 
     @Test
-    void handWrittenContractDocumentsOptionalApprovalCommentAndResponses() throws Exception {
+    void handWrittenContractDocumentsApprovalAndRejectionCommentRequirements() throws Exception {
         try (InputStream input = getClass().getResourceAsStream("/openapi.yaml")) {
             assertThat(input).isNotNull();
             Map<?, ?> document = new Yaml().load(input);
@@ -278,6 +297,22 @@ class OpenApiDocsIntegrationTest {
             Map<?, ?> properties = mapAt(decisionRequest, "properties");
             assertThat(properties.keySet().stream().map(Object::toString).toList()).containsExactly("comment");
             assertThat(decisionRequest.get("required")).isNull();
+
+            Map<?, ?> rejectOperation = mapAt(mapAt(paths, "/approvals/{requestId}/reject"), "post");
+            Map<?, ?> rejectBody = mapAt(rejectOperation, "requestBody");
+            Map<?, ?> rejectResponses = mapAt(rejectOperation, "responses");
+            assertThat(rejectBody.get("required")).isEqualTo(true);
+            assertThat(schemaRef(rejectBody, "content", "application/json", "schema"))
+                    .isEqualTo("#/components/schemas/RejectDecisionRequest");
+            assertThat(rejectResponses.keySet().stream().map(Object::toString).toList())
+                    .contains("200", "400", "401", "403", "404", "409");
+
+            Map<?, ?> rejectDecision = mapAt(schemas, "RejectDecisionRequest");
+            assertThat(rejectDecision.get("required")).isEqualTo(List.of("comment"));
+            Map<?, ?> rejectProperties = mapAt(rejectDecision, "properties");
+            Map<?, ?> comment = mapAt(rejectProperties, "comment");
+            assertThat(comment.get("minLength")).isEqualTo(1);
+            assertThat(comment.get("pattern")).isEqualTo(".*\\S.*");
         }
     }
 

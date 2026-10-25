@@ -80,6 +80,16 @@ public class ApprovalService {
                 requestId, LeaveRequestDecision.APPROVED, comment, approverId);
     }
 
+    public LeaveRequestResponse reject(long requestId, String comment) {
+        long approverId = accessPolicy.currentUserId();
+        LeaveRequestResponse request = leaveRequestService.get(requestId);
+        if (request.getApproverId() != approverId) {
+            throw new AccessDeniedException("Caller is not the assigned approver for request " + requestId);
+        }
+        return leaveRequestService.applyDecision(
+                requestId, LeaveRequestDecision.REJECTED, comment, approverId);
+    }
+
     private ApprovalDetail toApprovalDetail(
             LeaveRequestResponse request, String employeeUsername, String leaveTypeName) {
         BalanceResponse balance = balanceService.getBalancesForUser(request.getEmployeeId()).stream()

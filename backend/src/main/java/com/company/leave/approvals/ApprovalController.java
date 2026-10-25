@@ -15,6 +15,7 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -75,5 +76,38 @@ public class ApprovalController {
                             content = @Content(schema = @Schema(implementation = ApprovalDecisionRequest.class)))
                     ApprovalDecisionRequest decision) {
         return approvalService.approve(requestId, decision == null ? null : decision.getComment());
+    }
+
+    @Operation(summary = "Reject a pending request",
+            description = "Rejects a request assigned to the authenticated caller. A non-blank comment is required.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Rejected request",
+                content = @Content(mediaType = "application/json",
+                        schema = @Schema(implementation = LeaveRequestResponse.class))),
+        @ApiResponse(responseCode = "400", description = "A non-blank rejection comment is required",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "401", description = "No valid access_token cookie",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "403", description = "Caller is not this request's assigned approver",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "404", description = "Request does not exist",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "409", description = "Request is no longer pending",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @PostMapping("/{requestId}/reject")
+    public LeaveRequestResponse reject(
+            @Parameter(description = "Leave request id", required = true) @PathVariable long requestId,
+            @RequestBody(required = false)
+                    @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                            required = true,
+                            content = @Content(schema = @Schema(implementation = RejectDecisionRequest.class)))
+                    RejectDecisionRequest decision) {
+        return approvalService.reject(requestId, decision == null ? null : decision.getComment());
     }
 }

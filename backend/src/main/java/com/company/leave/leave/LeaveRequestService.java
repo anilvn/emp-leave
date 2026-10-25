@@ -207,7 +207,8 @@ public class LeaveRequestService {
                 request.getLeaveTypeId(),
                 request.getWorkingDays(),
                 actorId,
-                requestId);
+                requestId,
+                "Cancelled leave request " + requestId);
         String detail = "Cancelled request for "
                 + describeRange(request.getStartDate(), request.getEndDate(), request.getWorkingDays()) + ".";
         request.cancelPending();
@@ -228,45 +229,72 @@ public class LeaveRequestService {
         if (request.getApproverId() != approverId) {
             throw new AccessDeniedException("Caller is not the assigned approver for request " + requestId);
         }
+        String transitionVerb = decision == LeaveRequestDecision.REJECTED ? "rejected" : "approved";
         if (request.getStatus() != RequestStatus.PENDING) {
             throw new ApiException(
                     HttpStatus.CONFLICT,
                     ErrorCode.INVALID_TRANSITION,
                     "Request " + requestId + " is " + request.getStatus()
-                            + " and can no longer be approved.");
+                            + " and can no longer be " + transitionVerb + ".");
         }
-        if (decision != LeaveRequestDecision.APPROVED) {
+        if (decision != LeaveRequestDecision.APPROVED && decision != LeaveRequestDecision.REJECTED) {
             throw new IllegalArgumentException("Unsupported decision: " + decision);
+        }
+        if (decision == LeaveRequestDecision.REJECTED && (comment == null || comment.isBlank())) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    ErrorCode.COMMENT_REQUIRED,
+                    "A non-blank comment is required to reject a request.");
         }
 
         Instant decidedAt = Instant.now();
-        request.approve(approverId, decidedAt, comment);
+        if (decision == LeaveRequestDecision.APPROVED) {
+            request.approve(approverId, decidedAt, comment);
+        } else {
+            request.reject(approverId, decidedAt, comment);
+        }
         leaveRequestRepository.save(request);
-        balanceService.deductReservation(
-                request.getEmployeeId(),
-                request.getLeaveTypeId(),
-                request.getWorkingDays(),
-                approverId,
-                requestId);
+        if (decision == LeaveRequestDecision.APPROVED) {
+            balanceService.deductReservation(
+                    request.getEmployeeId(),
+                    request.getLeaveTypeId(),
+                    request.getWorkingDays(),
+                    approverId,
+                    requestId);
+        } else {
+            balanceService.releaseReservation(
+                    request.getEmployeeId(),
+                    request.getLeaveTypeId(),
+                    request.getWorkingDays(),
+                    approverId,
+                    requestId,
+                    "Rejected leave request " + requestId);
+        }
+        String auditAction = decision == LeaveRequestDecision.APPROVED
+                ? "LEAVE_REQUEST_APPROVED"
+                : "LEAVE_REQUEST_REJECTED";
         auditService.recordEvent(
                 "LEAVE_REQUEST",
                 requestId,
-                "LEAVE_REQUEST_APPROVED",
+                auditAction,
                 approverId,
                 encodeDetails(comment == null ? "Approved request." : comment));
 
         String leaveTypeName = leaveTypeService.findNameById(request.getLeaveTypeId())
                 .orElseThrow(() -> new IllegalStateException(
                         "Leave type " + request.getLeaveTypeId() + " does not exist."));
+        NotificationKind notificationKind = decision == LeaveRequestDecision.APPROVED
+                ? NotificationKind.APPROVED
+                : NotificationKind.REJECTED;
         NotificationMessage notification = new NotificationMessage(
                 request.getEmployeeId(),
                 requestId,
-                NotificationKind.APPROVED,
+                notificationKind,
                 leaveTypeName,
                 request.getStartDate(),
                 request.getEndDate(),
                 request.getWorkingDays(),
-                RequestStatus.APPROVED.name());
+                request.getStatus().name());
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
