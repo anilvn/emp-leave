@@ -71,6 +71,12 @@ Use the layered modular-monolith pattern (AD-1/AD-2): `approvals` authorizes and
 ## Review Triage Log
 
 - **patch** — HR self-rejection lacked an assertion that its audit details remain the ordinary detail-only payload, so removing the approval-only condition could go undetected. Added a Testcontainers integration case verifying the rejection audit JSON contains `detail` and no `selfApproval`; the full targeted suites pass with this assertion.
+- **false** — The blind review said HR self-approval history was not asserted. `seededApprovalChainRoutesAndDecidesRequestsAtEveryLevel` fetches HR's history and asserts both the `APPROVED` type and unchanged `detail`.
+- **false** — The blind review requested a same-team, unassigned approver test. `ApprovalService` rejects every caller whose ID differs from `approverId`; existing wrong-approver API coverage exercises the same authorization guard, and this story's required rejection scenario is cross-team.
+- **false** — The blind review requested same-team, unassigned request-read tests. `AccessPolicy.requireOwnerManagerOrHr` limits access to owner, assigned approver, or HR; the required out-of-team detail/history denial is exercised through the same policy.
+- **false** — The blind review claimed access-log assertions were not correlated. Decision tests query by actor, request resource ID, denial flag, and operation; detail/history tests query by actor, exact resource path, and denial flag.
+- **false** — The blind review asked whether self-approval is HR-only. The approved decision is self-approval exactly when employee and approver IDs match; HR with no manager is the configured self-approval case, and the identity check accurately marks any self-assigned approval.
+- **false** — The blind review said HR routing and queue visibility were not asserted. The chain API test checks HR's submission response has HR as employee and approver, retrieves it from HR's pending queue, approves it, and verifies its audit marker.
 
 ## Verification
 
