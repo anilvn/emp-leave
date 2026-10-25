@@ -132,6 +132,14 @@ public class BalanceService {
                         HttpStatus.CONFLICT, ErrorCode.INSUFFICIENT_BALANCE,
                         "No balance row exists for userId=" + userId + " leaveTypeId=" + leaveTypeId));
 
+        if (balance.getReservedDays() < workingDays) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.INSUFFICIENT_BALANCE,
+                    "Cannot release " + workingDays + " working days for request " + requestId
+                            + " from a reservation of " + balance.getReservedDays() + " days.");
+        }
+
         balance.adjustReservation(-workingDays);
         leaveBalanceRepository.save(balance);
 
