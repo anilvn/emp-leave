@@ -88,6 +88,13 @@ public class LeaveRequestService {
      * queue.
      */
     @Transactional(readOnly = true)
+    public List<LeaveRequestResponse> getApprovedTeamLeaveInRange(long managerId, LocalDate from, LocalDate to) {
+        return leaveRequestRepository.findApprovedTeamLeaveInRange(managerId, from, to).stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<LeaveRequestResponse> findPendingApprovalsByScope(UserScope scope, long currentUserId) {
         return leaveRequestRepository.findPendingApprovalsByScope(scope, currentUserId).stream()
                 .map(this::toResponse)

@@ -1,5 +1,6 @@
 package com.company.leave.leave;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -54,6 +55,20 @@ interface LeaveRequestRepository extends Repository<LeaveRequest, Long> {
             """)
     List<LeaveRequest> findPendingAssignedTo(
             @Param("approverId") long approverId, @Param("status") RequestStatus status);
+
+    @Query(value = """
+            select *
+            from leave_requests
+            where status = 'APPROVED'
+              and approver_id = :managerId
+              and (cast(:from as date) is null or end_date >= cast(:from as date))
+              and (cast(:to as date) is null or start_date <= cast(:to as date))
+            order by start_date asc, id asc
+            """, nativeQuery = true)
+    List<LeaveRequest> findApprovedTeamLeaveInRange(
+            @Param("managerId") long managerId,
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to);
 
     default List<LeaveRequest> findByScope(UserScope scope) {
         return findByScope(scope, null, null);
