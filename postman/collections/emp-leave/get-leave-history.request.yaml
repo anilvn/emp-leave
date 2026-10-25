@@ -20,23 +20,23 @@ description: "Generated from cURL: curl -X 'POST' \\\r
   \  \"notes\": \"Family trip\"\r
 
   }'"
-url: http://localhost:8080/requests
-method: POST
+url: http://localhost:8080/requests/9
+method: PUT
 headers:
   accept: "*/*"
   Content-Type: application/json
-  Cookie: "{{json_web_token_17f8}}"
+  Cookie: "{{json_web_token_0fwf}}"
 body:
   type: json
   content: "{\r
 
     \  \"leaveTypeId\": 1,\r
 
-    \  \"startDate\": \"2026-10-30\",\r
+    \  \"startDate\": \"2026-10-29\",\r
 
     \  \"endDate\": \"2026-11-01\",\r
 
     \  \"notes\": \"Family trip\"\r
 
     }"
-order: 7187
+order: 9000

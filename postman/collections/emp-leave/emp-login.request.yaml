@@ -1,5 +1,4 @@
 $kind: http-request
-name: http://localhost:8080/auth/login
 description: "Generated from cURL: curl -X 'POST' \\\r
 
   \  'http://localhost:8080/auth/login' \\\r

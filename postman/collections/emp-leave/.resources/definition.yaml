@@ -30,3 +30,9 @@ variables:
   - key: json_web_token_17f8
     secret: true
     disabled: false
+  - key: json_web_token_13xu
+    secret: true
+    disabled: false
+  - key: json_web_token_0fwf
+    secret: true
+    disabled: false

@@ -15,7 +15,7 @@ info:
     scenario 1 (Thu 2026-10-29 to Tue 2026-11-03 = 4 working days).
 
     Applies to every operation below except POST /auth/login,
-    POST /auth/logout and POST /auth/change-password: while the
+    POST /auth/logout, POST /auth/change-password and GET /auth/me: while the
     authenticated user's `mustChangePassword` is true, the call is refused
     with 403 PASSWORD_CHANGE_REQUIRED (see the PasswordChangeRequired
     response component). This is how FR20's "must change on login" is
@@ -175,6 +175,62 @@ paths:
                 detail: Current password is incorrect.
                 instance: /api/auth/change-password
                 code: INVALID_CREDENTIALS
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Current session's user
+      description: >
+        Returns the logged-in user for the session cookie, so the client can
+        restore its state after a page refresh or deep link without storing
+        anything in the browser. Exempt from PASSWORD_CHANGE_REQUIRED, so a
+        user holding a temporary password can still be routed to the
+        change-password screen. Counts as activity for the 30-minute idle
+        timeout like any other authenticated call (FR58).
+      x-functional-requirements: [FR56, FR58]
+      responses:
+        '200':
+          description: Session is valid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUser'
+              example:
+                id: 5
+                username: emp.jsmith
+                role: EMPLOYEE
+                mustChangePassword: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ---------------------------------------------------------- Leave types
+  /leave-types:
+    get:
+      tags: [Leave Requests]
+      summary: List leave types
+      description: >
+        All authenticated roles. Backs the leave-type dropdown on the submit
+        form and every leaveTypeId -> name display in the UI (FR1), so the
+        client never hard-codes leave type ids.
+      x-functional-requirements: [FR1, FR6]
+      responses:
+        '200':
+          description: Every leave type
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LeaveType'
+              example:
+                - id: 1
+                  name: Vacation
+                - id: 2
+                  name: Sick
+                - id: 3
+                  name: Parental
+                - id: 4
+                  name: Sabbatical
 
   # ------------------------------------------------------------ Requests
   /requests:
@@ -1631,6 +1687,12 @@ components:
         format: int64
 
   responses:
+    Unauthorized:
+      description: >
+        No session cookie, or the session is invalid, revoked or idle for
+        more than 30 minutes (FR58). Empty body — distinct from the 401
+        INVALID_CREDENTIALS ProblemDetail returned by login and
+        change-password for a wrong password.
     Forbidden:
       description: >
         Caller is not allowed to see or act on this resource. A 403 here
@@ -1858,6 +1920,19 @@ components:
         temporaryPassword: Temp#8841
 
     # ---- leave requests ----------------------------------------------
+    LeaveType:
+      type: object
+      description: leave_types table (FR1)
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+      example:
+        id: 1
+        name: Vacation
+
     LeaveRequestCreate:
       type: object
       required: [leaveTypeId, startDate, endDate]
@@ -1924,10 +1999,16 @@ components:
         employeeId:
           type: integer
           format: int64
+        employeeUsername:
+          type: string
+          description: Display join on employeeId (users table has no separate full-name field)
         approverId:
           type: integer
           format: int64
           description: The manager (or HR, for a top-level manager's own request) who may decide
+        approverUsername:
+          type: string
+          description: Display join on approverId
         leaveTypeId:
           type: integer
           format: int64
@@ -1958,7 +2039,9 @@ components:
       example:
         id: 101
         employeeId: 5
+        employeeUsername: emp.jsmith
         approverId: 3
+        approverUsername: mgr.chen
         leaveTypeId: 1
         startDate: "2026-10-29"
         endDate: "2026-11-03"
@@ -1980,9 +2063,6 @@ components:
         - $ref: '#/components/schemas/LeaveRequest'
         - type: object
           properties:
-            employeeUsername:
-              type: string
-              description: Display name for the requester (users table has no separate "full name" field)
             leaveTypeName:
               type: string
               description: From leave_types.name, e.g. Vacation, Sick, Parental, Sabbatical
@@ -2063,6 +2143,9 @@ components:
         authorId:
           type: integer
           format: int64
+        authorUsername:
+          type: string
+          description: Display join on authorId
         body:
           type: string
         createdAt:
@@ -2072,6 +2155,7 @@ components:
         id: 44
         requestId: 101
         authorId: 3
+        authorUsername: mgr.chen
         body: Can you cover the Tuesday handover before you leave?
         createdAt: "2026-10-22T13:40:00Z"
 
@@ -2137,6 +2221,9 @@ components:
         employeeId:
           type: integer
           format: int64
+        employeeUsername:
+          type: string
+          description: Display join on employeeId
         leaveTypeId:
           type: integer
           format: int64
