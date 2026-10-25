@@ -1,0 +1,16 @@
+$kind: http-request
+description: "HR adjusts a user's leave balance by a signed delta (FR29). Requires HR_ADMIN role."
+url: http://localhost:8080/balances/5/1/adjust
+method: POST
+headers:
+  accept: application/json
+  Content-Type: application/json
+  Cookie: access_token={{json_web_token_0dcw}}
+body:
+  mode: raw
+  raw: |
+    {
+      "changeDays": 2,
+      "reason": "Carryover correction after manual review"
+    }
+order: 22000

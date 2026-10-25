@@ -232,6 +232,54 @@ public class BalanceService {
                 .build();
     }
 
+    /**
+     * Adjusts {@code total_days} for the given user and leave type by a signed delta, writing an
+     * {@code ADJUST} ledger row and an audit event in the same transaction (FR29, FR30, FR31).
+     */
+    @Transactional
+    public BalanceResponse adjustBalance(long userId, long leaveTypeId, int changeDays,
+                                         String reason, long actorId) {
+        if (changeDays == 0) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    ErrorCode.VALIDATION_FAILED,
+                    "changeDays must not be zero");
+        }
+
+        LeaveBalanceId balanceId = new LeaveBalanceId(userId, leaveTypeId);
+        LeaveBalance balance = leaveBalanceRepository.findById(balanceId)
+                .orElse(new LeaveBalance(balanceId, 0));
+
+        int newTotal = balance.getTotalDays() + changeDays;
+        if (newTotal < 0 || newTotal < balance.getReservedDays()) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.INSUFFICIENT_BALANCE,
+                    "Adjustment of " + changeDays + " days would take the balance below zero or "
+                            + "below reserved days (" + balance.getReservedDays() + " reserved, "
+                            + "current total " + balance.getTotalDays() + ").");
+        }
+
+        balance.setTotalDays(newTotal);
+        leaveBalanceRepository.save(balance);
+
+        balanceLedgerRepository.save(new BalanceLedger(
+                userId, leaveTypeId, changeDays, LedgerKind.ADJUST,
+                reason, actorId, null, Instant.now()));
+
+        auditService.recordEvent(
+                "LEAVE_BALANCE", userId, "LEAVE_BALANCE_ADJUSTED", actorId,
+                "{\"changeDays\":" + changeDays + ",\"leaveTypeId\":" + leaveTypeId + "}");
+
+        return BalanceResponse.builder()
+                .userId(userId)
+                .leaveTypeId(leaveTypeId)
+                .totalDays(newTotal)
+                .reservedDays(balance.getReservedDays())
+                .availableDays(newTotal - balance.getReservedDays())
+                .build();
+    }
+
     @Transactional(readOnly = true)
     public List<BalanceResponse> getAllBalances(Long userId) {
         List<LeaveBalance> rows = userId != null

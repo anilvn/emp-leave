@@ -16,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -80,6 +81,35 @@ public class BalanceController {
         return ResponseEntity.ok(
                 balanceService.setBalance(userId, leaveTypeId,
                         request.getTotalDays(), request.getReason(), actorId));
+    }
+
+    @Operation(
+            summary = "Adjust a balance",
+            description = "HR_ADMIN only. Adds or removes days from total_days by a signed delta; "
+                    + "reason is required. Writes an ADJUST ledger row (FR29, FR30).")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Updated balance"),
+        @ApiResponse(responseCode = "400", description = "Missing/blank reason, null or zero changeDays",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "403", description = "Caller is not HR_ADMIN",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "409", description = "Would take total_days below zero or reserved_days",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @PostMapping("/{userId}/{leaveTypeId}/adjust")
+    public ResponseEntity<BalanceResponse> adjustBalance(
+            @PathVariable long userId,
+            @PathVariable long leaveTypeId,
+            @RequestBody @Valid AdjustBalanceRequest request,
+            Authentication authentication) {
+        accessPolicy.requireRole(Role.HR_ADMIN);
+        long actorId = ((Number) authentication.getPrincipal()).longValue();
+        return ResponseEntity.ok(
+                balanceService.adjustBalance(userId, leaveTypeId,
+                        request.getChangeDays(), request.getReason(), actorId));
     }
 
     @Operation(

@@ -32,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -377,6 +378,125 @@ class BalanceControllerIntegrationTest {
                         .content("{\"totalDays\":25,\"reason\":\"Employee trying to set own balance\"}"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+    }
+
+    // --- Story 4.3: POST /balances/{userId}/{leaveTypeId}/adjust ---
+
+    @Test
+    void hrAdminAdjustsBalanceUpSuccessfully() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+
+        mockMvc.perform(post("/balances/{userId}/{typeId}/adjust", 5L, vacationTypeId)
+                        .with(authenticatedAs(1L, "HR_ADMIN"))
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"changeDays\":5,\"reason\":\"Carryover correction\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value(5))
+                .andExpect(jsonPath("$.leaveTypeId").value((int) vacationTypeId))
+                .andExpect(jsonPath("$.totalDays").value(25))
+                .andExpect(jsonPath("$.reservedDays").value(0))
+                .andExpect(jsonPath("$.availableDays").value(25));
+
+        Map<String, Object> ledger = jdbcTemplate.queryForMap(
+                "select * from balance_ledger where user_id = 5 and leave_type_id = ? and kind = 'ADJUST' and change_days = 5",
+                vacationTypeId);
+        assertThat(((Number) ledger.get("change_days")).intValue()).isEqualTo(5);
+        assertThat(ledger.get("reason")).isEqualTo("Carryover correction");
+        assertThat(((Number) ledger.get("actor_id")).longValue()).isEqualTo(1L);
+        assertThat(ledger.get("request_id")).isNull();
+    }
+
+    @Test
+    void hrAdminAdjustsBalanceDownSuccessfully() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+
+        mockMvc.perform(post("/balances/{userId}/{typeId}/adjust", 5L, vacationTypeId)
+                        .with(authenticatedAs(1L, "HR_ADMIN"))
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"changeDays\":-3,\"reason\":\"Correction after leave taken outside system\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value(5))
+                .andExpect(jsonPath("$.leaveTypeId").value((int) vacationTypeId))
+                .andExpect(jsonPath("$.totalDays").value(17))
+                .andExpect(jsonPath("$.reservedDays").value(0))
+                .andExpect(jsonPath("$.availableDays").value(17));
+
+        Map<String, Object> ledger = jdbcTemplate.queryForMap(
+                "select * from balance_ledger where user_id = 5 and leave_type_id = ? and kind = 'ADJUST' and change_days = -3",
+                vacationTypeId);
+        assertThat(((Number) ledger.get("change_days")).intValue()).isEqualTo(-3);
+    }
+
+    @Test
+    void adjustBalanceBelowReservedDaysGets409() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        jdbcTemplate.update(
+                "update leave_balances set reserved_days = 10 where user_id = 5 and leave_type_id = ?",
+                vacationTypeId);
+
+        mockMvc.perform(post("/balances/{userId}/{typeId}/adjust", 5L, vacationTypeId)
+                        .with(authenticatedAs(1L, "HR_ADMIN"))
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"changeDays\":-15,\"reason\":\"Trying to remove too many days\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("INSUFFICIENT_BALANCE"));
+    }
+
+    @Test
+    void adjustBalanceWithZeroChangeDaysGets400() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+
+        mockMvc.perform(post("/balances/{userId}/{typeId}/adjust", 5L, vacationTypeId)
+                        .with(authenticatedAs(1L, "HR_ADMIN"))
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"changeDays\":0,\"reason\":\"No-op adjustment\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void adjustBalanceWithBlankReasonGets400() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+
+        mockMvc.perform(post("/balances/{userId}/{typeId}/adjust", 5L, vacationTypeId)
+                        .with(authenticatedAs(1L, "HR_ADMIN"))
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"changeDays\":5,\"reason\":\"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void nonHrCallerIsRefusedFromAdjustBalance() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+
+        mockMvc.perform(post("/balances/{userId}/{typeId}/adjust", 5L, vacationTypeId)
+                        .with(authenticatedAs(5L, "EMPLOYEE"))
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"changeDays\":5,\"reason\":\"Employee trying to adjust own balance\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+    }
+
+    @Test
+    void unauthenticatedCallerGets401ForAdjustBalance() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        mockMvc.perform(post("/balances/{userId}/{typeId}/adjust", 5L, vacationTypeId)
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"changeDays\":5,\"reason\":\"Unauthenticated\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void adjustBalanceWithNullChangeDaysGets400() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+
+        mockMvc.perform(post("/balances/{userId}/{typeId}/adjust", 5L, vacationTypeId)
+                        .with(authenticatedAs(1L, "HR_ADMIN"))
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"reason\":\"Missing changeDays field\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
     }
 
     private long leaveTypeId(String name) {
