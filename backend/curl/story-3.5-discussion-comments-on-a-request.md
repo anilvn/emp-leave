@@ -10,7 +10,7 @@ BASE=https://localhost/api
 ```
 
 The local proxy uses a self-signed certificate, so these examples pass `-k`.
-Log in as the seeded employee, their manager, and an unrelated employee:
+Log in as the seeded employee, their manager, HR, and an unrelated employee:
 
 ```bash
 login() {
@@ -22,9 +22,10 @@ login() {
 
 EMPLOYEE_TOKEN=$(login emp.jsmith)
 MANAGER_TOKEN=$(login mgr.chen)
+HR_TOKEN=$(login hr.admin)
 OTHER_TOKEN=$(login emp.torres)
 test -n "$EMPLOYEE_TOKEN" && test -n "$MANAGER_TOKEN" \
-  && test -n "$OTHER_TOKEN" || {
+  && test -n "$HR_TOKEN" && test -n "$OTHER_TOKEN" || {
     echo "Login did not return all access tokens"; exit 1;
   }
 ```
@@ -87,6 +88,27 @@ curl -skS -f "$BASE/requests/$REQUEST_ID/history" \
 
 Expected: the history timeline contains `COMMENT` entries interleaved with
 `SUBMITTED` and any other events, each with `detail` equal to the comment body.
+
+## Add and list comments (authorized — HR)
+
+HR can read and post on any request:
+
+```bash
+curl -skS -f -X POST "$BASE/requests/$REQUEST_ID/comments" \
+  -H 'Content-Type: application/json' \
+  -H "Cookie: access_token=$HR_TOKEN" \
+  -d '{"body":"Noted for the audit trail."}'
+```
+
+Expected: `201 Created`, `authorUsername: "hr.admin"`.
+
+```bash
+curl -skS -f "$BASE/requests/$REQUEST_ID/comments" \
+  -H "Cookie: access_token=$HR_TOKEN"
+```
+
+Expected: `200 OK` with all comments including the one just posted, each with
+`authorUsername` set and results in `createdAt ASC, id ASC` order.
 
 ## Unauthorized caller is denied
 

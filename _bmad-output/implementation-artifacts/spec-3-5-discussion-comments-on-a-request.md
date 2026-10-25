@@ -2,7 +2,7 @@
 title: 'Story 3.5: Discussion Comments on a Request'
 type: 'feature'
 created: '2026-10-25'
-status: 'in-progress'
+status: 'done'
 route: 'dispatch'
 review_loop_iteration: 0
 baseline_commit: '6496a0d4218b17f1a5bb1edf15be80a59a02af0f'
@@ -57,18 +57,18 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `backend/src/main/resources/db/migration/V13__create_request_comments_table.sql` -- create `request_comments` table with FK to `leave_requests` and `users`; `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`
-- [ ] `backend/src/main/java/com/company/leave/leave/RequestComment.java` -- JPA entity for `request_comments`; Lombok `@Getter @NoArgsConstructor @AllArgsConstructor @Builder`; id `IDENTITY` strategy
-- [ ] `backend/src/main/java/com/company/leave/leave/RequestCommentRepository.java` -- package-private `JpaRepository`; `findByRequestIdOrderByCreatedAtAscIdAsc(long requestId)`
-- [ ] `backend/src/main/java/com/company/leave/leave/Comment.java` -- response DTO with `@Schema(name = "Comment")`; replace `approvals.ApprovalComment`
-- [ ] `backend/src/main/java/com/company/leave/leave/CommentCreateRequest.java` -- `@NotBlank String body` field
-- [ ] `backend/src/main/java/com/company/leave/leave/LeaveRequestService.java` -- add `listComments` and `addComment` methods; `addComment` saves row then writes audit event; `encodeCommentDetails` uses `{"requestId": N, "comment": "..."}` so existing `decodeDetail("REQUEST_COMMENT_ADDED", json)` in same class continues to work for history
-- [ ] `backend/src/main/java/com/company/leave/leave/LeaveRequestController.java` -- `GET /{requestId}/comments` (200 list) and `POST /{requestId}/comments` (201 Comment)
-- [ ] `backend/src/main/java/com/company/leave/approvals/ApprovalComment.java` -- delete file
-- [ ] `backend/src/main/java/com/company/leave/approvals/ApprovalDetail.java` -- swap `ApprovalComment` → `leave.Comment`
-- [ ] `backend/src/main/java/com/company/leave/approvals/ApprovalService.java` -- swap `auditService.findLeaveRequestComments` + manual `ApprovalComment` build → `leaveRequestService.listComments(request.getId())`
-- [ ] `backend/src/test/java/com/company/leave/leave/LeaveRequestControllerIntegrationTest.java` -- add Testcontainers cases (see ACs)
-- [ ] `backend/curl/story-3.5-discussion-comments-on-a-request.md` -- curl guide
+- [x] `backend/src/main/resources/db/migration/V13__create_request_comments_table.sql` -- create `request_comments` table with FK to `leave_requests` and `users`; `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`
+- [x] `backend/src/main/java/com/company/leave/leave/RequestComment.java` -- JPA entity for `request_comments`; Lombok `@Getter @NoArgsConstructor @AllArgsConstructor @Builder`; id `IDENTITY` strategy
+- [x] `backend/src/main/java/com/company/leave/leave/RequestCommentRepository.java` -- package-private `JpaRepository`; `findByRequestIdOrderByCreatedAtAscIdAsc(long requestId)`
+- [x] `backend/src/main/java/com/company/leave/leave/Comment.java` -- response DTO with `@Schema(name = "Comment")`; replace `approvals.ApprovalComment`
+- [x] `backend/src/main/java/com/company/leave/leave/CommentCreateRequest.java` -- `@NotBlank String body` field
+- [x] `backend/src/main/java/com/company/leave/leave/LeaveRequestService.java` -- add `listComments` and `addComment` methods; `addComment` saves row then writes audit event; `encodeCommentDetails` uses `{"requestId": N, "comment": "..."}` so existing `decodeDetail("REQUEST_COMMENT_ADDED", json)` in same class continues to work for history
+- [x] `backend/src/main/java/com/company/leave/leave/LeaveRequestController.java` -- `GET /{requestId}/comments` (200 list) and `POST /{requestId}/comments` (201 Comment)
+- [x] `backend/src/main/java/com/company/leave/approvals/ApprovalComment.java` -- delete file
+- [x] `backend/src/main/java/com/company/leave/approvals/ApprovalDetail.java` -- swap `ApprovalComment` → `leave.Comment`
+- [x] `backend/src/main/java/com/company/leave/approvals/ApprovalService.java` -- swap `auditService.findLeaveRequestComments` + manual `ApprovalComment` build → `leaveRequestService.listComments(request.getId())`
+- [x] `backend/src/test/java/com/company/leave/leave/LeaveRequestControllerIntegrationTest.java` -- add Testcontainers cases (see ACs)
+- [x] `backend/curl/story-3.5-discussion-comments-on-a-request.md` -- curl guide
 
 **Acceptance Criteria:**
 - Given an authorized user (owner, assigned manager, or HR), when `POST /api/requests/{id}/comments` is called with a non-blank body, then the response is 201 with `id`, `requestId`, `authorId`, `authorUsername`, `body`, and `createdAt` set; an `audit_events` row with `entity='REQUEST_COMMENT'`, `action='REQUEST_COMMENT_ADDED'`, `actor_id=authorId`, and `details_json` containing the `requestId` and `comment` text is committed in the same transaction.
@@ -85,6 +85,25 @@ context:
 ## Spec Change Log
 
 ## Review Triage Log
+
+**Review pass 1 (2026-10-25)**
+
+- BH-1 Missing index on `request_comments.request_id` — **low / patch** — real gap; `findByRequestIdOrderByCreatedAtAscIdAsc` needs a covering index; fix: add `CREATE INDEX` to V13 migration.
+- BH-2 No `ON DELETE CASCADE` on FK — **false** — the application has no delete-leave-request path; `author_id REFERENCES users(id)` (no cascade) prevents deletion of a user who has comments, so the violation is unreachable.
+- BH-3 `created_at` set in both Java and DB default — **low / rejected** — clock skew is unlikely in co-located deployment; fix requires adding `@CreationTimestamp` Hibernate annotation, which is more than a direct correction.
+- BH-4 / VG-1 No HR-role test for comments endpoints — **medium / patch** — confirmed: existing tests for other `requireOwnerManagerOrHr` endpoints loop over HR, but the new comment tests use only EMPLOYEE and MANAGER. Grouped.
+- BH-5 / EC-5 `addComment_idMatchesBetweenCommentsEndpointAndApprovalDetail` never calls `GET /approvals/pending` — **medium / patch** — confirmed: the test only queries the DB and the comments endpoint; AC-8 cross-endpoint ID claim is untested. Grouped.
+- BH-6 No HR-role curl example — **low / patch** — direct addition to the curl guide.
+- BH-7 `@ApiResponse` success responses missing `@Content`/`@Schema` — **false** — existing endpoints in the same controller (lines 62, 80) also omit content schemas on 200; new endpoints follow the established pattern.
+- BH-8 `review_loop_iteration` = 0 after entering review — **false** — counter is incremented only on loopback per step-04; 0 is correct on first entry.
+- BH-9 / EC-4 Dead `AuditService.findLeaveRequestComments` and `AuditEventRepository.findRequestCommentEvents` — **false** — spec's Design Notes explicitly record the decision to leave them in place.
+- BH-10 Blank-body validation duplication in service — **low / rejected** — service-level check is defensive for direct callers; removing it weakens the invariant, fix is not a direct correction.
+- BH-11 Missing `audit_events` assertion for blank-body test — **false** — `@Valid`/`@NotBlank` fires before service is entered; audit event cannot be emitted for blank-body request.
+- BH-12 `## Implementation Notes` empty — **false** — section is legitimately empty at planning time per the spec template.
+- EC-1 `authorUsername` null if author deleted — **false** — `author_id REFERENCES users(id)` (no cascade) prevents deletion of a user who has comments; `.get()` cannot return null.
+- EC-2 `authorUsername` null in `addComment` 201 — **false** — same FK reasoning; author row is guaranteed present at comment-insert time.
+- EC-3 Unauthorized + blank body returns 400 not 403 — **low / rejected** — standard Spring MVC: `@Valid` fires before controller body; fix requires structural reordering of validation and authorization.
+- EC-6 AC-7 combined ordering scenario untested — **false** — all event types write to the same `audit_events` table ordered by `created_at`; mechanism is shared and covered by individual-type tests.
 
 ## Design Notes
 

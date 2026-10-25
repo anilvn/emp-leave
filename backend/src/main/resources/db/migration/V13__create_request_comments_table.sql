@@ -5,3 +5,5 @@ create table request_comments (
     body       text        not null,
     created_at timestamptz not null default now()
 );
+
+create index on request_comments (request_id, created_at, id);

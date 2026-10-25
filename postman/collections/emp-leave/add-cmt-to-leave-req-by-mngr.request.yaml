@@ -1,0 +1,30 @@
+$kind: http-request
+description: "Generated from cURL: curl -X 'POST' \\\r
+
+  \  'http://localhost:8080/requests/10/comments' \\\r
+
+  \  -H 'accept: */*' \\\r
+
+  \  -H 'Content-Type: application/json' \\\r
+
+  \  -H 'Cookie: access_token={{json_web_token_14o5}}' \\\r
+
+  \  -d '{\r
+
+  \  \"body\": \"please add commnet -0001\"\r
+
+  }'"
+url: http://localhost:8080/requests/10/comments
+method: POST
+headers:
+  accept: "*/*"
+  Content-Type: application/json
+  Cookie: "{{json_web_token_0bxu}}"
+body:
+  type: json
+  content: "{\r
+
+    \  \"body\": \"please add commnet -0001\"\r
+
+    }"
+order: 17826

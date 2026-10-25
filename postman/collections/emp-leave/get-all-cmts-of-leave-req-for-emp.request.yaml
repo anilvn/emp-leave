@@ -1,0 +1,14 @@
+$kind: http-request
+description: "Generated from cURL: curl -X 'GET' \\\r
+
+  \  'http://localhost:8080/requests/10/comments' \\\r
+
+  \  -H 'accept: */*' \\\r
+
+  \  -H 'Cookie: access_token={{json_web_token_14o5}}'"
+url: http://localhost:8080/requests/10/comments
+method: GET
+headers:
+  accept: "*/*"
+  Cookie: access_token={{json_web_token_14o5}}
+order: 19000

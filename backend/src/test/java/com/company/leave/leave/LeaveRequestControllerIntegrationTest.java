@@ -1604,6 +1604,39 @@ class LeaveRequestControllerIntegrationTest {
     }
 
     @Test
+    void commentsAreVisibleToOwnerManagerAndHr() throws Exception {
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, leaveTypeId("Vacation"), "PENDING");
+        long hrId = 1L;
+
+        // Each authorized caller can GET the empty list
+        for (long[] pair : new long[][] {{EMPLOYEE_ID}, {MANAGER_ID}, {hrId}}) {
+            long userId = pair[0];
+            String role = userId == EMPLOYEE_ID ? "EMPLOYEE" : userId == MANAGER_ID ? "MANAGER" : "HR_ADMIN";
+            mockMvc.perform(get("/requests/{requestId}/comments", requestId)
+                            .with(authenticatedAs(userId, role)))
+                    .andExpect(status().isOk());
+        }
+
+        // Each authorized caller can POST a comment
+        for (long[] pair : new long[][] {{EMPLOYEE_ID}, {MANAGER_ID}, {hrId}}) {
+            long userId = pair[0];
+            String role = userId == EMPLOYEE_ID ? "EMPLOYEE" : userId == MANAGER_ID ? "MANAGER" : "HR_ADMIN";
+            mockMvc.perform(post("/requests/{requestId}/comments", requestId)
+                            .with(authenticatedAs(userId, role))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"body\":\"Comment from " + role + "\"}"))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.authorId").value((int) userId));
+        }
+
+        // All three comments are visible to any of the authorized callers
+        mockMvc.perform(get("/requests/{requestId}/comments", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(3));
+    }
+
+    @Test
     void addComment_idMatchesBetweenCommentsEndpointAndApprovalDetail() throws Exception {
         long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, leaveTypeId("Vacation"), "PENDING");
 
@@ -1628,6 +1661,16 @@ class LeaveRequestControllerIntegrationTest {
         Long dbId = jdbcTemplate.queryForObject(
                 "select id from request_comments where request_id = ?", Long.class, requestId);
         assertThat(dbId).isEqualTo(commentId);
+
+        // GET /approvals/pending — AC-8: ApprovalDetail.comments[0].id must equal the id from GET .../comments
+        MvcResult pendingResult = mockMvc.perform(get("/approvals/pending")
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].comments.length()").value(1))
+                .andReturn();
+        long approvalCommentId = ((Number) JsonPath.read(
+                pendingResult.getResponse().getContentAsString(), "$[0].comments[0].id")).longValue();
+        assertThat(approvalCommentId).isEqualTo(commentId);
     }
 
     private long leaveTypeId(String name) {
