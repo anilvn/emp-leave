@@ -61,6 +61,7 @@ class LeaveRequestControllerIntegrationTest {
     /** Seeded employee (id=5, manager_id=3). */
     private static final long EMPLOYEE_ID = 5L;
     private static final long MANAGER_ID = 3L;
+    private static final long OTHER_MANAGER_ID = 4L;
 
     @BeforeEach
     void setUp() {
@@ -366,6 +367,34 @@ class LeaveRequestControllerIntegrationTest {
         assertThat(jdbcTemplate.queryForObject(
                 "select count(*) from access_log where actor_id = ? and resource = ? and allowed = false",
                 Integer.class, unrelatedManagerId, "GET /api/requests/" + requestId + "/history")).isEqualTo(1);
+    }
+
+    @Test
+    void outOfScopeManagerCannotReadRequestDetailOrHistory() throws Exception {
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, leaveTypeId("Vacation"), "PENDING");
+        jdbcTemplate.update("update leave_requests set notes = 'confidential leave notes' where id = ?", requestId);
+
+        MvcResult detail = mockMvc.perform(get("/requests/{requestId}", requestId)
+                        .with(forwardedApiPrefix())
+                        .with(authenticatedAs(OTHER_MANAGER_ID, "MANAGER")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
+                .andReturn();
+        MvcResult history = mockMvc.perform(get("/requests/{requestId}/history", requestId)
+                        .with(forwardedApiPrefix())
+                        .with(authenticatedAs(OTHER_MANAGER_ID, "MANAGER")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
+                .andReturn();
+
+        assertThat(detail.getResponse().getContentAsString()).doesNotContain("confidential leave notes");
+        assertThat(history.getResponse().getContentAsString()).doesNotContain("confidential leave notes");
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from access_log where actor_id = ? and resource = ? and allowed = false",
+                Integer.class, OTHER_MANAGER_ID, "GET /api/requests/" + requestId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from access_log where actor_id = ? and resource = ? and allowed = false",
+                Integer.class, OTHER_MANAGER_ID, "GET /api/requests/" + requestId + "/history")).isEqualTo(1);
     }
 
     @Test

@@ -212,6 +212,107 @@ class ApprovalControllerIntegrationTest {
     }
 
     @Test
+    void seededApprovalChainRoutesAndDecidesRequestsAtEveryLevel() throws Exception {
+        long vacationId = leaveTypeId("Vacation");
+        long[] submitters = {EMPLOYEE_ID, MANAGER_ID, TOP_LEVEL_MANAGER_ID, HR_ID};
+        long[] approvers = {MANAGER_ID, TOP_LEVEL_MANAGER_ID, HR_ID, HR_ID};
+        String[] submitterRoles = {"EMPLOYEE", "MANAGER", "MANAGER", "HR_ADMIN"};
+        String[] approverRoles = {"MANAGER", "MANAGER", "HR_ADMIN", "HR_ADMIN"};
+        String[] startDates = {"2026-12-01", "2026-12-08", "2026-12-15", "2026-12-22"};
+
+        for (int i = 0; i < submitters.length; i++) {
+            MvcResult submitted = mockMvc.perform(post("/requests")
+                            .with(authenticatedAs(submitters[i], submitterRoles[i]))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                        "leaveTypeId": %d,
+                                        "startDate": "%s",
+                                        "endDate": "%s",
+                                        "notes": "Approval chain level %d"
+                                    }
+                                    """.formatted(vacationId, startDates[i],
+                                    java.time.LocalDate.parse(startDates[i]).plusDays(1), i + 1)))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.employeeId").value(submitters[i]))
+                    .andExpect(jsonPath("$.approverId").value(approvers[i]))
+                    .andExpect(jsonPath("$.status").value("PENDING"))
+                    .andReturn();
+            long requestId = ((Number) JsonPath.read(
+                    submitted.getResponse().getContentAsString(), "$.id")).longValue();
+
+            mockMvc.perform(get("/approvals/pending")
+                            .with(authenticatedAs(approvers[i], approverRoles[i])))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[0].id").value(requestId))
+                    .andExpect(jsonPath("$[0].approverId").value(approvers[i]));
+
+            mockMvc.perform(post("/approvals/{requestId}/approve", requestId)
+                            .with(authenticatedAs(approvers[i], approverRoles[i])))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("APPROVED"))
+                    .andExpect(jsonPath("$.approverId").value(approvers[i]));
+
+            if (submitters[i] == HR_ID) {
+                assertThat(jdbcTemplate.queryForObject("""
+                        select details_json -> 'selfApproval' = 'true'::jsonb
+                          from audit_events
+                         where entity = 'LEAVE_REQUEST' and entity_id = ?
+                           and action = 'LEAVE_REQUEST_APPROVED'
+                        """, Boolean.class, requestId)).isTrue();
+                mockMvc.perform(get("/requests/{requestId}/history", requestId)
+                                .with(authenticatedAs(HR_ID, "HR_ADMIN")))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$[1].type").value("APPROVED"))
+                        .andExpect(jsonPath("$[1].detail").value("Approved request."));
+            } else {
+                assertThat(jdbcTemplate.queryForObject("""
+                        select details_json = jsonb_build_object('detail', 'Approved request.')
+                          from audit_events
+                         where entity = 'LEAVE_REQUEST' and entity_id = ?
+                           and action = 'LEAVE_REQUEST_APPROVED'
+                        """, Boolean.class, requestId)).isTrue();
+            }
+        }
+    }
+
+    @Test
+    void hrSelfRejectionKeepsOrdinaryAuditDetails() throws Exception {
+        long vacationId = leaveTypeId("Vacation");
+        MvcResult submitted = mockMvc.perform(post("/requests")
+                        .with(authenticatedAs(HR_ID, "HR_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "leaveTypeId": %d,
+                                    "startDate": "2026-12-29",
+                                    "endDate": "2026-12-30",
+                                    "notes": "HR leave not taken"
+                                }
+                                """.formatted(vacationId)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.employeeId").value(HR_ID))
+                .andExpect(jsonPath("$.approverId").value(HR_ID))
+                .andReturn();
+        long requestId = ((Number) JsonPath.read(
+                submitted.getResponse().getContentAsString(), "$.id")).longValue();
+
+        mockMvc.perform(post("/approvals/{requestId}/reject", requestId)
+                        .with(authenticatedAs(HR_ID, "HR_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"comment\":\"Plans changed.\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"));
+
+        assertThat(jdbcTemplate.queryForObject("""
+                select details_json = jsonb_build_object('detail', 'Plans changed.')
+                  from audit_events
+                 where entity = 'LEAVE_REQUEST' and entity_id = ?
+                   and action = 'LEAVE_REQUEST_REJECTED'
+                """, Boolean.class, requestId)).isTrue();
+    }
+
+    @Test
     void emptyQueueReturnsAnEmptyArray() throws Exception {
         mockMvc.perform(get("/approvals/pending").with(authenticatedAs(OTHER_MANAGER_ID, "MANAGER")))
                 .andExpect(status().isOk())
@@ -600,6 +701,13 @@ class ApprovalControllerIntegrationTest {
                         .with(authenticatedAs(OTHER_MANAGER_ID, "MANAGER")))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+        mockMvc.perform(post("/approvals/{requestId}/reject", requestId)
+                        .header("X-Forwarded-Prefix", "/api")
+                        .with(authenticatedAs(OTHER_MANAGER_ID, "MANAGER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"comment\":\"Unauthorized rejection\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
 
         assertBalance(EMPLOYEE_ID, vacationId, 20, 4);
         assertThat(jdbcTemplate.queryForObject("""
@@ -608,8 +716,25 @@ class ApprovalControllerIntegrationTest {
                    and resource like '%/approve'
                 """, Long.class, OTHER_MANAGER_ID, requestId))
                 .isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from access_log
+                 where actor_id = ? and resource_id = ? and allowed = false
+                   and resource like '%/reject'
+                """, Long.class, OTHER_MANAGER_ID, requestId))
+                .isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select status from leave_requests where id = ?", String.class, requestId)).isEqualTo("PENDING");
+        assertThat(jdbcTemplate.queryForObject(
+                "select decision_comment from leave_requests where id = ?", String.class, requestId)).isNull();
         assertThat(jdbcTemplate.queryForObject(
                 "select count(*) from balance_ledger where request_id = ?", Long.class, requestId)).isZero();
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from audit_events
+                 where entity = 'LEAVE_REQUEST' and entity_id = ?
+                   and action in ('LEAVE_REQUEST_APPROVED', 'LEAVE_REQUEST_REJECTED')
+                """, Long.class, requestId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from notifications where request_id = ?", Long.class, requestId)).isZero();
     }
 
     @Test

@@ -278,7 +278,9 @@ public class LeaveRequestService {
                 requestId,
                 auditAction,
                 approverId,
-                encodeDetails(comment == null ? "Approved request." : comment));
+                encodeDecisionDetails(
+                        comment == null ? "Approved request." : comment,
+                        decision == LeaveRequestDecision.APPROVED && request.getEmployeeId() == approverId));
 
         String leaveTypeName = leaveTypeService.findNameById(request.getLeaveTypeId())
                 .orElseThrow(() -> new IllegalStateException(
@@ -422,6 +424,19 @@ public class LeaveRequestService {
     private String encodeDetails(String detail) {
         try {
             return AUDIT_DETAILS_MAPPER.writeValueAsString(java.util.Map.of("detail", detail));
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Could not encode request history audit details.", ex);
+        }
+    }
+
+    private String encodeDecisionDetails(String detail, boolean selfApproval) {
+        if (!selfApproval) {
+            return encodeDetails(detail);
+        }
+        try {
+            return AUDIT_DETAILS_MAPPER.writeValueAsString(java.util.Map.of(
+                    "detail", detail,
+                    "selfApproval", true));
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("Could not encode request history audit details.", ex);
         }
