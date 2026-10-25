@@ -7,7 +7,7 @@ Docker Compose:
 ```bash
 cp .env.example .env
 # Set a private JWT_SECRET value in .env; do not commit it.
-docker compose up --build
+docker compose up --build -d
 BASE=https://localhost/api
 ```
 

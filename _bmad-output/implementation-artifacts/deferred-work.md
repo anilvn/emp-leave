@@ -58,3 +58,15 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-6-cancel-a-pending-request.md`
   summary: Clarify in the frontend architecture that FR26 access logging is backend-only and has no frontend feature surface.
   evidence: The architecture binds FR1–FR31 but does not map FR26 in its capability table, leaving implementers without an explicit boundary. This is independent of cancellation behavior.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-cancel-a-pending-request.md`
+  summary: Reconcile the frontend adversarial review with the revised architecture spine and its `final` status.
+  evidence: Review findings H1/H2/H3/H5/H6 still describe missing route-scoped services, auth bootstrap, an `Unauthorized` response, correct core UI placement, and `AppLinks`, although the spine now specifies them; the review still says `NOT READY` while the spine says `final`. This could mislead frontend implementation and is unrelated to cancellation.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-cancel-a-pending-request.md`
+  summary: Define which successful writes invalidate the frontend audit data-version signal.
+  evidence: Frontend AD-5 includes `audit` among data-version signals but does not list any mutation that bumps it, so audit screens can remain stale after audit-producing changes. This is separate from the backend cancellation implementation.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-cancel-a-pending-request.md`
+  summary: Restore missing request-history, status-filter, and notification details in the Epic 2 context.
+  evidence: The revised context omits the `GET /requests` status filter and `GET /requests/{id}/history` requirements, notification payload details, and owner-only notification visibility that appeared in its prior version. The context also leaves notification-write failure behavior unspecified. These are unrelated to cancellation and should be reconciled against their source requirements.

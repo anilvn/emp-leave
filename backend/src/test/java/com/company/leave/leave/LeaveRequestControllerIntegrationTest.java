@@ -1155,6 +1155,32 @@ class LeaveRequestControllerIntegrationTest {
     }
 
     @Test
+    void cancellingWithoutBalanceReturnsInsufficientBalanceWithoutMutation() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");
+        jdbcTemplate.update(
+                "delete from leave_balances where user_id = ? and leave_type_id = ?",
+                EMPLOYEE_ID, vacationTypeId);
+
+        mockMvc.perform(post("/requests/{requestId}/cancel", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("INSUFFICIENT_BALANCE"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select status from leave_requests where id = ?", String.class, requestId)).isEqualTo("PENDING");
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from balance_ledger where request_id = ? and kind = 'RELEASE'",
+                Integer.class, requestId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from audit_events where entity_id = ? and action = 'LEAVE_REQUEST_CANCELLED'",
+                Integer.class, requestId)).isZero();
+    }
+
+    @Test
     void cancellationAuditFailureRollsBackStatusReservationAndLedger() throws Exception {
         long vacationTypeId = leaveTypeId("Vacation");
         long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");
