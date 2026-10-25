@@ -10,10 +10,14 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -47,6 +51,35 @@ public class BalanceController {
             @RequestParam(required = false) Long userId) {
         accessPolicy.requireRole(Role.HR_ADMIN);
         return ResponseEntity.ok(balanceService.getAllBalances(userId));
+    }
+
+    @Operation(
+            summary = "Set a balance",
+            description = "HR_ADMIN only. Sets total_days for the given user and leave type; "
+                    + "reason is required. Writes a SET ledger row (FR28, FR30).")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Updated balance"),
+        @ApiResponse(responseCode = "400", description = "Missing or blank reason, or negative totalDays",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "403", description = "Caller is not HR_ADMIN",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "409", description = "Would make total_days less than reserved_days",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @PutMapping("/{userId}/{leaveTypeId}")
+    public ResponseEntity<BalanceResponse> setBalance(
+            @PathVariable long userId,
+            @PathVariable long leaveTypeId,
+            @RequestBody @Valid SetBalanceRequest request,
+            Authentication authentication) {
+        accessPolicy.requireRole(Role.HR_ADMIN);
+        long actorId = ((Number) authentication.getPrincipal()).longValue();
+        return ResponseEntity.ok(
+                balanceService.setBalance(userId, leaveTypeId,
+                        request.getTotalDays(), request.getReason(), actorId));
     }
 
     @Operation(

@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import com.company.leave.audit.AuditService;
 import com.company.leave.common.ApiException;
 import com.company.leave.common.ErrorCode;
 import com.company.leave.leave.LeaveTypeResponse;
@@ -22,13 +23,16 @@ public class BalanceService {
     private final LeaveBalanceRepository leaveBalanceRepository;
     private final BalanceLedgerRepository balanceLedgerRepository;
     private final LeaveTypeService leaveTypeService;
+    private final AuditService auditService;
 
     BalanceService(LeaveBalanceRepository leaveBalanceRepository,
                    BalanceLedgerRepository balanceLedgerRepository,
-                   LeaveTypeService leaveTypeService) {
+                   LeaveTypeService leaveTypeService,
+                   AuditService auditService) {
         this.leaveBalanceRepository = leaveBalanceRepository;
         this.balanceLedgerRepository = balanceLedgerRepository;
         this.leaveTypeService = leaveTypeService;
+        this.auditService = auditService;
     }
 
     @Transactional(readOnly = true)
@@ -185,6 +189,47 @@ public class BalanceService {
                 actorId,
                 requestId,
                 Instant.now()));
+    }
+
+    /**
+     * Sets {@code total_days} for the given user and leave type, writing a {@code SET}
+     * ledger row and an audit event in the same transaction (FR28, FR30, FR42, AD-4, AD-5).
+     */
+    @Transactional
+    public BalanceResponse setBalance(long userId, long leaveTypeId, int newTotalDays,
+                                      String reason, long actorId) {
+        LeaveBalanceId balanceId = new LeaveBalanceId(userId, leaveTypeId);
+        LeaveBalance balance = leaveBalanceRepository.findById(balanceId)
+                .orElse(new LeaveBalance(balanceId, 0));
+
+        if (newTotalDays < balance.getReservedDays()) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.INSUFFICIENT_BALANCE,
+                    "Cannot set total to " + newTotalDays + " days; "
+                            + balance.getReservedDays()
+                            + " days are already reserved for pending requests.");
+        }
+
+        int oldTotalDays = balance.getTotalDays();
+        balance.setTotalDays(newTotalDays);
+        leaveBalanceRepository.save(balance);
+
+        balanceLedgerRepository.save(new BalanceLedger(
+                userId, leaveTypeId, newTotalDays - oldTotalDays, LedgerKind.SET,
+                reason, actorId, null, Instant.now()));
+
+        auditService.recordEvent(
+                "LEAVE_BALANCE", userId, "LEAVE_BALANCE_SET", actorId,
+                "{\"totalDays\":" + newTotalDays + ",\"leaveTypeId\":" + leaveTypeId + "}");
+
+        return BalanceResponse.builder()
+                .userId(userId)
+                .leaveTypeId(leaveTypeId)
+                .totalDays(newTotalDays)
+                .reservedDays(balance.getReservedDays())
+                .availableDays(newTotalDays - balance.getReservedDays())
+                .build();
     }
 
     @Transactional(readOnly = true)

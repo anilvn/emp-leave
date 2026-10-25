@@ -51,4 +51,16 @@ class LeaveBalance {
         this.reservedDays -= days;
         this.totalDays -= days;
     }
+
+    /** Creates a new balance row with zero reserved days. Used by HR set when no row exists yet. */
+    LeaveBalance(LeaveBalanceId id, int totalDays) {
+        this.id = id;
+        this.totalDays = totalDays;
+        this.reservedDays = 0;
+    }
+
+    /** Sets total days; the caller must have verified newTotal >= reservedDays. */
+    void setTotalDays(int newTotal) {
+        this.totalDays = newTotal;
+    }
 }
