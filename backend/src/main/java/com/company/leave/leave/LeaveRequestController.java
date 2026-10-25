@@ -74,6 +74,24 @@ public class LeaveRequestController {
     }
 
     @Operation(
+            summary = "Get leave request history",
+            description = "Returns the request timeline, visible to its owner, the owner's direct manager, and HR.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Chronological request history"),
+        @ApiResponse(responseCode = "401", description = "No valid access_token cookie"),
+        @ApiResponse(responseCode = "403", description = "Caller is outside the request's permitted scope",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "404", description = "Request not found",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @GetMapping("/{requestId}/history")
+    public List<HistoryEntry> getLeaveRequestHistory(@PathVariable long requestId) {
+        return leaveRequestService.history(requestId);
+    }
+
+    @Operation(
             summary = "Submit a leave request",
             description = "Working days are computed server-side (Mon-Fri inclusive, holidays ignored). "
                     + "Reserves the requested days against the employee's balance; refused if days "

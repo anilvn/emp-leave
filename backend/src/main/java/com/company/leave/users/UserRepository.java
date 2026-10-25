@@ -14,6 +14,8 @@ interface UserRepository extends Repository<User, Long> {
 
     Optional<User> findById(Long id);
 
+    List<User> findByIdIn(Collection<Long> ids);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<User> findByUsername(String username);
 

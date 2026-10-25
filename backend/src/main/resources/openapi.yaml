@@ -555,8 +555,10 @@ paths:
       tags: [Leave Requests]
       summary: Request History tab
       description: >
-        Timeline merging submission, edits, comments and the decision, in
-        order (FR45). Visible to the owner, their manager, and HR.
+        Timeline of recorded request events, ordered oldest first (FR45).
+        Epic 2 records submission, edits and cancellation; approval, rejection
+        and comment events appear as their owning lifecycle actions record them.
+        Visible to the owner, their manager, and HR.
       x-functional-requirements: [FR45]
       responses:
         '200':
@@ -570,22 +572,34 @@ paths:
               example:
                 - type: SUBMITTED
                   actorId: 5
+                  actorUsername: emp.jsmith
                   occurredAt: "2026-10-22T09:15:00Z"
                   detail: Submitted Vacation, 2026-10-29 to 2026-11-03 (4 working days)
                 - type: EDITED
                   actorId: 5
+                  actorUsername: emp.jsmith
                   occurredAt: "2026-10-22T10:02:00Z"
                   detail: Changed to 2026-10-30 to 2026-11-03 (3 working days)
                 - type: COMMENT
                   actorId: 3
+                  actorUsername: mgr.chen
                   occurredAt: "2026-10-22T13:40:00Z"
                   detail: Can you cover the Tuesday handover before you leave?
                 - type: APPROVED
                   actorId: 3
+                  actorUsername: mgr.chen
                   occurredAt: "2026-10-23T08:50:00Z"
                   detail: Enjoy your trip!
+        '401':
+          description: Authentication required
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /requests/{requestId}/comments:
     parameters:
@@ -2073,12 +2087,16 @@ components:
     HistoryEntry:
       type: object
       description: One row of the request History tab timeline (FR45)
+      required: [type, actorId, actorUsername, occurredAt, detail]
       properties:
         type:
           $ref: '#/components/schemas/HistoryEntryType'
         actorId:
           type: integer
           format: int64
+        actorUsername:
+          type: string
+          description: Display join on actorId
         occurredAt:
           type: string
           format: date-time
@@ -2088,6 +2106,7 @@ components:
       example:
         type: APPROVED
         actorId: 3
+        actorUsername: mgr.chen
         occurredAt: "2026-10-23T08:50:00Z"
         detail: Enjoy your trip!
 

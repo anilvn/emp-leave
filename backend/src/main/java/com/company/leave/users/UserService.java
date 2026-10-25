@@ -2,10 +2,13 @@ package com.company.leave.users;
 
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import com.company.leave.audit.AuditService;
 import com.company.leave.common.ApiException;
@@ -199,6 +202,15 @@ public class UserService {
                 .orElseThrow(() -> new ApiException(
                         HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND, "User " + userId + " not found."));
         return user.getManagerId();
+    }
+
+    @Transactional(readOnly = true)
+    public Map<Long, String> getUsernamesByIds(Collection<Long> userIds) {
+        if (userIds.isEmpty()) {
+            return Map.of();
+        }
+        return userRepository.findByIdIn(userIds).stream()
+                .collect(Collectors.toUnmodifiableMap(User::getId, User::getUsername));
     }
 
     @Transactional(readOnly = true)

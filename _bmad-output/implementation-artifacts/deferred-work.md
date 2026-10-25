@@ -70,3 +70,19 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-6-cancel-a-pending-request.md`
   summary: Restore missing request-history, status-filter, and notification details in the Epic 2 context.
   evidence: The revised context omits the `GET /requests` status filter and `GET /requests/{id}/history` requirements, notification payload details, and owner-only notification visibility that appeared in its prior version. The context also leaves notification-write failure behavior unspecified. These are unrelated to cancellation and should be reconciled against their source requirements.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-the-history-timeline-on-a-request.md`
+  summary: Correct the user-owned Postman history request so it calls the history endpoint.
+  evidence: `postman/collections/emp-leave/get-leave-history.request.yaml` currently sends `PUT /requests/9` with an edit body instead of `GET /requests/{requestId}/history`. The untracked user-owned request was preserved during Story 2.7.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-the-history-timeline-on-a-request.md`
+  summary: Fix authentication cookie names in the user-owned Postman history, cancellation, and edit requests.
+  evidence: The `Cookie` values in `get-leave-history.request.yaml`, `cancel-a-pending-leave-req.request.yaml`, and `put-req-change-leave-req-1.request.yaml` omit the required `access_token=` name. These user-owned requests were preserved during Story 2.7.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-the-history-timeline-on-a-request.md`
+  summary: Replace copied submission descriptions in the user-owned Postman history, cancellation, and edit requests.
+  evidence: The descriptions in the history, cancellation, and edit request definitions still describe submitting a request, so they do not match their operations. These user-owned requests were preserved during Story 2.7.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-the-history-timeline-on-a-request.md`
+  summary: Define pagination or retention behavior if a request accumulates a very large history.
+  evidence: Story 2.7 specifies a complete oldest-first timeline but no pagination contract or response bound. Adding an implicit limit could hide history; define explicit pagination if production history volume warrants it.

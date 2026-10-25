@@ -1,6 +1,7 @@
 package com.company.leave.common;
 
 import java.io.InputStream;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -48,6 +49,11 @@ class OpenApiDocsIntegrationTest {
                 .andExpect(jsonPath("$.paths['/users/managers'].get").exists())
                 .andExpect(jsonPath("$.paths['/requests'].get").exists())
                 .andExpect(jsonPath("$.paths['/requests/{requestId}'].get").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}/history'].get").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}/history'].get.responses['200']").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}/history'].get.responses['401']").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}/history'].get.responses['403']").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}/history'].get.responses['404']").exists())
                 .andExpect(jsonPath("$.paths['/requests/{requestId}'].put").exists())
                 .andExpect(jsonPath("$.paths['/requests/{requestId}'].put.responses['200']").exists())
                 .andExpect(jsonPath("$.paths['/requests/{requestId}'].put.responses['404']").exists())
@@ -132,6 +138,40 @@ class OpenApiDocsIntegrationTest {
             assertThat(problemCode(mapAt(responses, "409"), "content", "application/problem+json",
                     "examples", "missingBalance", "value"))
                     .isEqualTo("INSUFFICIENT_BALANCE");
+        }
+    }
+
+    @Test
+    void handWrittenContractDocumentsRequestHistoryEntryTypesAndFields() throws Exception {
+        try (InputStream input = getClass().getResourceAsStream("/openapi.yaml")) {
+            assertThat(input).isNotNull();
+            Map<?, ?> document = new Yaml().load(input);
+            Map<?, ?> paths = (Map<?, ?>) document.get("paths");
+            Map<?, ?> historyPath = (Map<?, ?>) paths.get("/requests/{requestId}/history");
+            Map<?, ?> historyOperation = (Map<?, ?>) historyPath.get("get");
+            Map<?, ?> responses = (Map<?, ?>) historyOperation.get("responses");
+            assertThat(responses.keySet().stream().map(Object::toString).toList())
+                    .contains("200", "401", "403", "404");
+            assertThat(schemaRef(mapAt(responses, "200"), "content", "application/json", "schema", "items"))
+                    .isEqualTo("#/components/schemas/HistoryEntry");
+
+            Map<?, ?> components = (Map<?, ?>) document.get("components");
+            Map<?, ?> schemas = (Map<?, ?>) components.get("schemas");
+            Map<?, ?> historyEntry = (Map<?, ?>) schemas.get("HistoryEntry");
+            Map<?, ?> properties = (Map<?, ?>) historyEntry.get("properties");
+            assertThat(properties.keySet().stream().map(Object::toString).toList())
+                    .contains("type", "actorId", "actorUsername", "occurredAt", "detail");
+            assertThat(((List<?>) historyEntry.get("required")).stream()
+                            .map(Object::toString)
+                            .toList())
+                    .containsExactly("type", "actorId", "actorUsername", "occurredAt", "detail");
+
+            Map<?, ?> historyEntryType = (Map<?, ?>) schemas.get("HistoryEntryType");
+            List<String> enumValues = ((List<?>) historyEntryType.get("enum")).stream()
+                    .map(Object::toString)
+                    .toList();
+            assertThat(enumValues)
+                    .containsExactly("SUBMITTED", "EDITED", "CANCELLED", "APPROVED", "REJECTED", "COMMENT");
         }
     }
 

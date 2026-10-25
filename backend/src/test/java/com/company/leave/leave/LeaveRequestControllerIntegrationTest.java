@@ -287,6 +287,159 @@ class LeaveRequestControllerIntegrationTest {
     }
 
     @Test
+    void requestHistoryShowsSubmissionEditsAndCancellationOldestFirst() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long requestId = createPendingRequest(
+                vacationTypeId, "2026-10-29", "2026-11-03", "initial notes");
+
+        assertThat(performEdit(
+                requestId, vacationTypeId, "2026-10-30", "2026-11-03", "first edit")).isEqualTo(200);
+        assertThat(performEdit(
+                requestId, vacationTypeId, "2026-11-02", "2026-11-03", "second edit")).isEqualTo(200);
+        mockMvc.perform(post("/requests/{requestId}/cancel", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isOk());
+
+        MvcResult result = mockMvc.perform(get("/requests/{requestId}/history", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(4))
+                .andExpect(jsonPath("$[0].type").value("SUBMITTED"))
+                .andExpect(jsonPath("$[0].actorId").value((int) EMPLOYEE_ID))
+                .andExpect(jsonPath("$[0].actorUsername").value("emp.jsmith"))
+                .andExpect(jsonPath("$[0].occurredAt").isNotEmpty())
+                .andExpect(jsonPath("$[0].detail")
+                        .value("Submitted Vacation, 2026-10-29 to 2026-11-03 (4 working days)."))
+                .andExpect(jsonPath("$[1].type").value("EDITED"))
+                .andExpect(jsonPath("$[1].detail").value(
+                        "Edited request: Changed dates from 2026-10-29 to 2026-11-03 (4 working days) "
+                                + "to 2026-10-30 to 2026-11-03 (3 working days); updated notes."))
+                .andExpect(jsonPath("$[2].type").value("EDITED"))
+                .andExpect(jsonPath("$[2].detail").value(
+                        "Edited request: Changed dates from 2026-10-30 to 2026-11-03 (3 working days) "
+                                + "to 2026-11-02 to 2026-11-03 (2 working days); updated notes."))
+                .andExpect(jsonPath("$[3].type").value("CANCELLED"))
+                .andExpect(jsonPath("$[3].detail")
+                        .value("Cancelled request for 2026-11-02 to 2026-11-03 (2 working days)."))
+                .andReturn();
+
+        List<String> occurredAt = JsonPath.read(result.getResponse().getContentAsString(), "$[*].occurredAt");
+        assertThat(occurredAt.stream().map(Instant::parse).toList())
+                .isSortedAccordingTo(java.util.Comparator.naturalOrder());
+    }
+
+    @Test
+    void requestHistoryIsVisibleToOwnerDirectManagerAndHr() throws Exception {
+        long requestId = createPendingRequest(
+                leaveTypeId("Vacation"), "2026-10-29", "2026-11-03", "history access");
+
+        for (long userId : new long[] {EMPLOYEE_ID, MANAGER_ID, 1L}) {
+            String role = userId == EMPLOYEE_ID ? "EMPLOYEE" : userId == MANAGER_ID ? "MANAGER" : "HR_ADMIN";
+            mockMvc.perform(get("/requests/{requestId}/history", requestId)
+                            .with(authenticatedAs(userId, role)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[0].type").value("SUBMITTED"));
+        }
+    }
+
+    @Test
+    void requestHistoryDenialIsLoggedWithoutReturningData() throws Exception {
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, leaveTypeId("Vacation"), "PENDING");
+        long unrelatedManagerId = jdbcTemplate.queryForObject(
+                "select id from users where role = 'MANAGER' and id <> ? order by id limit 1",
+                Long.class, MANAGER_ID);
+
+        mockMvc.perform(get("/requests/{requestId}/history", requestId)
+                        .with(forwardedApiPrefix())
+                        .with(authenticatedAs(6L, "EMPLOYEE")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+        mockMvc.perform(get("/requests/{requestId}/history", requestId)
+                        .with(forwardedApiPrefix())
+                        .with(authenticatedAs(unrelatedManagerId, "MANAGER")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from access_log where actor_id = ? and resource = ? and allowed = false",
+                Integer.class, 6L, "GET /api/requests/" + requestId + "/history")).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from access_log where actor_id = ? and resource = ? and allowed = false",
+                Integer.class, unrelatedManagerId, "GET /api/requests/" + requestId + "/history")).isEqualTo(1);
+    }
+
+    @Test
+    void requestHistoryForUnknownIdReturnsNotFound() throws Exception {
+        mockMvc.perform(get("/requests/{requestId}/history", Long.MAX_VALUE)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
+    void requestHistoryExplainsMissingDetailsOnLegacyEvents() throws Exception {
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, leaveTypeId("Vacation"), "PENDING");
+        jdbcTemplate.update("""
+                insert into audit_events (entity, entity_id, action, actor_id, details_json, created_at)
+                values ('LEAVE_REQUEST', ?, 'LEAVE_REQUEST_SUBMITTED', ?, cast(null as jsonb), now())
+                """, requestId, EMPLOYEE_ID);
+        jdbcTemplate.update("""
+                insert into audit_events (entity, entity_id, action, actor_id, details_json, created_at)
+                values ('LEAVE_REQUEST', ?, 'LEAVE_REQUEST_EDITED', ?, '{}'::jsonb, now() + interval '1 second')
+                """, requestId, EMPLOYEE_ID);
+
+        mockMvc.perform(get("/requests/{requestId}/history", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].detail").value("Event details were not recorded."))
+                .andExpect(jsonPath("$[1].detail").value("Event details were not recorded."));
+    }
+
+    @Test
+    void requestHistoryIncludesCommentAuditEventsByRequestId() throws Exception {
+        long requestId = createPendingRequest(
+                leaveTypeId("Vacation"), "2026-10-29", "2026-11-03", "history comment");
+        jdbcTemplate.update("""
+                insert into audit_events (entity, entity_id, action, actor_id, details_json, created_at)
+                values (
+                    'REQUEST_COMMENT',
+                    ?,
+                    'REQUEST_COMMENT_ADDED',
+                    ?,
+                    jsonb_build_object('requestId', ?, 'comment', ?),
+                    now() + interval '1 second'
+                )
+                """, requestId + 1000, MANAGER_ID, requestId, "Please arrange coverage.");
+
+        mockMvc.perform(get("/requests/{requestId}/history", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[1].type").value("COMMENT"))
+                .andExpect(jsonPath("$[1].actorId").value((int) MANAGER_ID))
+                .andExpect(jsonPath("$[1].actorUsername").value("mgr.chen"))
+                .andExpect(jsonPath("$[1].detail").value("Please arrange coverage."));
+    }
+
+    @Test
+    void requestHistoryUsesStableAuditIdOrderForEqualTimestamps() throws Exception {
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, leaveTypeId("Vacation"), "PENDING");
+        jdbcTemplate.update("""
+                insert into audit_events (entity, entity_id, action, actor_id, details_json, created_at)
+                values ('LEAVE_REQUEST', ?, 'LEAVE_REQUEST_EDITED', ?, cast(null as jsonb), '2026-10-25T10:00:00Z'),
+                       ('LEAVE_REQUEST', ?, 'LEAVE_REQUEST_SUBMITTED', ?, cast(null as jsonb), '2026-10-25T10:00:00Z')
+                """, requestId, EMPLOYEE_ID, requestId, EMPLOYEE_ID);
+
+        mockMvc.perform(get("/requests/{requestId}/history", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].type").value("EDITED"))
+                .andExpect(jsonPath("$[1].type").value("SUBMITTED"));
+    }
+
+    @Test
     void invalidRequestStatusReturnsValidationProblem() throws Exception {
         mockMvc.perform(get("/requests")
                         .param("status", "UNKNOWN")

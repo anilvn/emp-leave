@@ -2,7 +2,10 @@ package com.company.leave.leave;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 import com.company.leave.audit.AuditService;
 import com.company.leave.balances.BalanceService;
@@ -15,6 +18,9 @@ import com.company.leave.notifications.NotificationService;
 import com.company.leave.security.AccessPolicy;
 import com.company.leave.security.UserScope;
 import com.company.leave.users.UserService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +35,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  */
 @Service
 public class LeaveRequestService {
+
+    private static final ObjectMapper AUDIT_DETAILS_MAPPER = new ObjectMapper();
 
     private final LeaveRequestRepository leaveRequestRepository;
     private final LeaveTypeService leaveTypeService;
@@ -81,6 +89,22 @@ public class LeaveRequestService {
         return toResponse(request);
     }
 
+    @Transactional(readOnly = true)
+    public List<HistoryEntry> history(long requestId) {
+        LeaveRequest request = leaveRequestRepository.findById(requestId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        ErrorCode.NOT_FOUND,
+                        "Leave request " + requestId + " does not exist."));
+        accessPolicy.requireOwnerManagerOrHr(request.getEmployeeId(), request.getApproverId());
+        List<AuditService.RequestHistoryEvent> events = auditService.findLeaveRequestEvents(requestId);
+        Map<Long, String> actorUsernames = userService.getUsernamesByIds(
+                events.stream().map(AuditService.RequestHistoryEvent::actorId).distinct().toList());
+        return events.stream()
+                .map(event -> toHistoryEntry(event, actorUsernames.get(event.actorId())))
+                .toList();
+    }
+
     @Transactional
     public LeaveRequestResponse update(long requestId, LeaveRequestUpdateRequest update) {
         LeaveRequest request = leaveRequestRepository.findByIdForUpdate(requestId)
@@ -118,6 +142,10 @@ public class LeaveRequestService {
                     "Range yields zero working days");
         }
 
+        LocalDate previousStartDate = request.getStartDate();
+        LocalDate previousEndDate = request.getEndDate();
+        int previousWorkingDays = request.getWorkingDays();
+        boolean notesChanged = !Objects.equals(request.getNotes(), update.getNotes());
         long actorId = accessPolicy.currentUserId();
         balanceService.adjustReservation(
                 request.getEmployeeId(),
@@ -128,7 +156,19 @@ public class LeaveRequestService {
                 requestId);
         request.updatePendingDetails(update.getStartDate(), update.getEndDate(), workingDays, update.getNotes());
         leaveRequestRepository.save(request);
-        auditService.recordEvent("LEAVE_REQUEST", requestId, "LEAVE_REQUEST_EDITED", actorId, null);
+        auditService.recordEvent(
+                "LEAVE_REQUEST",
+                requestId,
+                "LEAVE_REQUEST_EDITED",
+                actorId,
+                encodeDetails(editDetail(
+                        previousStartDate,
+                        previousEndDate,
+                        previousWorkingDays,
+                        update.getStartDate(),
+                        update.getEndDate(),
+                        workingDays,
+                        notesChanged)));
         return toResponse(request);
     }
 
@@ -155,9 +195,12 @@ public class LeaveRequestService {
                 request.getWorkingDays(),
                 actorId,
                 requestId);
+        String detail = "Cancelled request for "
+                + describeRange(request.getStartDate(), request.getEndDate(), request.getWorkingDays()) + ".";
         request.cancelPending();
         leaveRequestRepository.save(request);
-        auditService.recordEvent("LEAVE_REQUEST", requestId, "LEAVE_REQUEST_CANCELLED", actorId, null);
+        auditService.recordEvent(
+                "LEAVE_REQUEST", requestId, "LEAVE_REQUEST_CANCELLED", actorId, encodeDetails(detail));
         return toResponse(request);
     }
 
@@ -210,7 +253,10 @@ public class LeaveRequestService {
         balanceService.reserve(actorId, request.getLeaveTypeId(), workingDays, actorId, leaveRequest.getId());
 
         // 7. Audit
-        auditService.recordEvent("LEAVE_REQUEST", leaveRequest.getId(), "LEAVE_REQUEST_SUBMITTED", actorId, null);
+        String detail = "Submitted " + leaveTypeName + ", "
+                + describeRange(leaveRequest.getStartDate(), leaveRequest.getEndDate(), workingDays) + ".";
+        auditService.recordEvent(
+                "LEAVE_REQUEST", leaveRequest.getId(), "LEAVE_REQUEST_SUBMITTED", actorId, encodeDetails(detail));
 
         NotificationMessage notification = new NotificationMessage(
                 approverId,
@@ -229,6 +275,83 @@ public class LeaveRequestService {
         });
 
         return toResponse(leaveRequest);
+    }
+
+    private HistoryEntry toHistoryEntry(AuditService.RequestHistoryEvent event, String actorUsername) {
+        return HistoryEntry.builder()
+                .type(historyEntryType(event.action()))
+                .actorId(event.actorId())
+                .actorUsername(actorUsername)
+                .occurredAt(event.createdAt())
+                .detail(decodeDetail(event.action(), event.detailsJson()))
+                .build();
+    }
+
+    private HistoryEntryType historyEntryType(String action) {
+        return switch (action) {
+            case "LEAVE_REQUEST_SUBMITTED" -> HistoryEntryType.SUBMITTED;
+            case "LEAVE_REQUEST_EDITED" -> HistoryEntryType.EDITED;
+            case "LEAVE_REQUEST_CANCELLED" -> HistoryEntryType.CANCELLED;
+            case "LEAVE_REQUEST_APPROVED" -> HistoryEntryType.APPROVED;
+            case "LEAVE_REQUEST_REJECTED" -> HistoryEntryType.REJECTED;
+            case "REQUEST_COMMENT_ADDED" -> HistoryEntryType.COMMENT;
+            default -> throw new IllegalStateException("Unsupported request history audit action: " + action);
+        };
+    }
+
+    private String decodeDetail(String action, String detailsJson) {
+        if (detailsJson == null || detailsJson.isBlank()) {
+            return "Event details were not recorded.";
+        }
+        try {
+            String detailField = action.equals("REQUEST_COMMENT_ADDED") ? "comment" : "detail";
+            JsonNode detail = AUDIT_DETAILS_MAPPER.readTree(detailsJson).get(detailField);
+            if (detail == null || detail.isNull()) {
+                return "Event details were not recorded.";
+            }
+            if (!detail.isTextual()) {
+                throw new IllegalStateException("Request history audit details must contain a text 'detail' value.");
+            }
+            return detail.textValue();
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Request history audit details contain invalid JSON.", ex);
+        }
+    }
+
+    private String encodeDetails(String detail) {
+        try {
+            return AUDIT_DETAILS_MAPPER.writeValueAsString(java.util.Map.of("detail", detail));
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Could not encode request history audit details.", ex);
+        }
+    }
+
+    private String editDetail(
+            LocalDate previousStartDate,
+            LocalDate previousEndDate,
+            int previousWorkingDays,
+            LocalDate startDate,
+            LocalDate endDate,
+            int workingDays,
+            boolean notesChanged) {
+        List<String> changes = new ArrayList<>();
+        if (!previousStartDate.equals(startDate) || !previousEndDate.equals(endDate)) {
+            changes.add("Changed dates from "
+                    + describeRange(previousStartDate, previousEndDate, previousWorkingDays)
+                    + " to " + describeRange(startDate, endDate, workingDays));
+        }
+        if (notesChanged) {
+            changes.add("updated notes");
+        }
+        if (changes.isEmpty()) {
+            changes.add("kept the date range at "
+                    + describeRange(startDate, endDate, workingDays));
+        }
+        return "Edited request: " + String.join("; ", changes) + ".";
+    }
+
+    private String describeRange(LocalDate startDate, LocalDate endDate, int workingDays) {
+        return startDate + " to " + endDate + " (" + workingDays + " working days)";
     }
 
     private LeaveRequestResponse toResponse(LeaveRequest entity) {

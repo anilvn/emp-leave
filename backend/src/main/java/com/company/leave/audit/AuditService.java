@@ -1,15 +1,16 @@
 package com.company.leave.audit;
 
 import java.time.Instant;
+import java.util.List;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The only type in {@code audit} callable from outside the package (AD-2). Exposes two
- * insert-only operations and nothing else — no update, no delete, no read — because the
- * immutability guarantee (AD-6) only holds if the write path never offers a way around it.
+ * The only type in {@code audit} callable from outside the package (AD-2). Exposes
+ * insert-only operations and a filtered request-history read, with no update or delete path.
  *
- * <p>Both methods take the actor id as an explicit parameter rather than deriving it from
+ * <p>Write methods take the actor id as an explicit parameter rather than deriving it from
  * {@code SecurityContextHolder} (AD-4): {@code audit} has no dependency on {@code security}
  * and must stay callable from contexts with no authenticated principal, such as a failed
  * login attempt.
@@ -33,6 +34,18 @@ public class AuditService {
         auditEventRepository.save(new AuditEvent(entity, entityId, action, actorId, detailsJson, Instant.now()));
     }
 
+    @Transactional(readOnly = true)
+    public List<RequestHistoryEvent> findLeaveRequestEvents(long requestId) {
+        return auditEventRepository.findRequestHistoryEvents(requestId)
+                .stream()
+                .map(event -> new RequestHistoryEvent(
+                        event.getAction(),
+                        event.getActorId(),
+                        event.getDetailsJson(),
+                        event.getCreatedAt()))
+                .toList();
+    }
+
     /**
      * Records an authorization decision, allowed or denied, against {@code resource}/
      * {@code resourceId}. {@code actorId}/{@code resourceId} may be {@code null}: an
@@ -42,4 +55,7 @@ public class AuditService {
     public void recordAccess(Long actorId, String resource, Long resourceId, boolean allowed) {
         accessLogRepository.save(new AccessLogEntry(actorId, resource, resourceId, allowed, Instant.now()));
     }
+
+    public record RequestHistoryEvent(
+            String action, long actorId, String detailsJson, Instant createdAt) {}
 }
