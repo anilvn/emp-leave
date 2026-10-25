@@ -7,6 +7,7 @@ import java.util.stream.Collectors;
 import com.company.leave.audit.AuditService;
 import com.company.leave.balances.BalanceResponse;
 import com.company.leave.balances.BalanceService;
+import com.company.leave.leave.Comment;
 import com.company.leave.leave.HistoryEntry;
 import com.company.leave.leave.LeaveRequestDecision;
 import com.company.leave.leave.LeaveRequestResponse;
@@ -99,20 +100,7 @@ public class ApprovalService {
                         "No balance response for leave type " + request.getLeaveTypeId()));
 
         List<HistoryEntry> history = leaveRequestService.history(request.getId());
-        List<AuditService.RequestCommentEvent> commentEvents =
-                auditService.findLeaveRequestComments(request.getId());
-        Map<Long, String> authorUsernames = userService.getUsernamesByIds(
-                commentEvents.stream().map(AuditService.RequestCommentEvent::authorId).distinct().toList());
-        List<ApprovalComment> comments = commentEvents.stream()
-                .map(event -> ApprovalComment.builder()
-                        .id(event.id())
-                        .requestId(request.getId())
-                        .authorId(event.authorId())
-                        .authorUsername(authorUsernames.get(event.authorId()))
-                        .body(event.body())
-                        .createdAt(event.createdAt())
-                        .build())
-                .toList();
+        List<Comment> comments = leaveRequestService.listComments(request.getId());
 
         return ApprovalDetail.builder()
                 .id(request.getId())

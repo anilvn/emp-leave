@@ -79,9 +79,10 @@ class LeaveRequestControllerIntegrationTest {
         dropNotificationFailureTrigger();
         dropEditAuditFailureTrigger();
         dropCancelAuditFailureTrigger();
-        // Notification and balance-ledger rows reference requests, so delete them first.
+        // Notification, balance-ledger, and comment rows reference requests, so delete them first.
         jdbcTemplate.update("delete from notifications");
         jdbcTemplate.update("delete from balance_ledger");
+        jdbcTemplate.update("delete from request_comments");
         jdbcTemplate.update("delete from leave_requests");
         jdbcTemplate.update(
                 "update users set must_change_password = false where id in (?, ?)", EMPLOYEE_ID, MANAGER_ID);
@@ -1424,6 +1425,209 @@ class LeaveRequestControllerIntegrationTest {
         assertThat(jdbcTemplate.queryForObject(
                 "select count(*) from audit_events where entity_id = ? and action = 'LEAVE_REQUEST_CANCELLED'",
                 Integer.class, requestId)).isZero();
+    }
+
+    // -------------------------------------------------------------------------
+    // Story 3.5: Discussion comments
+    // -------------------------------------------------------------------------
+
+    @Test
+    void addComment_happyPath_returns201WithAllFieldsAndAuditEvent() throws Exception {
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, leaveTypeId("Vacation"), "PENDING");
+
+        MvcResult result = mockMvc.perform(post("/requests/{requestId}/comments", requestId)
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"Please arrange coverage.\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").isNumber())
+                .andExpect(jsonPath("$.requestId").value((int) requestId))
+                .andExpect(jsonPath("$.authorId").value((int) MANAGER_ID))
+                .andExpect(jsonPath("$.authorUsername").value("mgr.chen"))
+                .andExpect(jsonPath("$.body").value("Please arrange coverage."))
+                .andExpect(jsonPath("$.createdAt").isNotEmpty())
+                .andReturn();
+
+        long commentId = ((Number) JsonPath.read(result.getResponse().getContentAsString(), "$.id")).longValue();
+
+        // Audit event written with correct fields
+        Integer auditCount = jdbcTemplate.queryForObject(
+                """
+                select count(*) from audit_events
+                where entity = 'REQUEST_COMMENT'
+                  and entity_id = ?
+                  and action = 'REQUEST_COMMENT_ADDED'
+                  and actor_id = ?
+                  and details_json ->> 'requestId' = cast(? as text)
+                  and details_json ->> 'comment' = 'Please arrange coverage.'
+                """,
+                Integer.class, commentId, MANAGER_ID, requestId);
+        assertThat(auditCount).isEqualTo(1);
+    }
+
+    @Test
+    void listComments_returnsAllCommentsOldestFirst() throws Exception {
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, leaveTypeId("Vacation"), "PENDING");
+
+        // Post two comments
+        mockMvc.perform(post("/requests/{requestId}/comments", requestId)
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"First comment.\"}"))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/requests/{requestId}/comments", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"Second comment.\"}"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/requests/{requestId}/comments", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].body").value("First comment."))
+                .andExpect(jsonPath("$[0].authorId").value((int) MANAGER_ID))
+                .andExpect(jsonPath("$[0].authorUsername").value("mgr.chen"))
+                .andExpect(jsonPath("$[1].body").value("Second comment."))
+                .andExpect(jsonPath("$[1].authorId").value((int) EMPLOYEE_ID))
+                .andExpect(jsonPath("$[1].authorUsername").value("emp.jsmith"));
+    }
+
+    @Test
+    void addComment_unauthorizedCaller_returns403AndAccessLogEntry() throws Exception {
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, leaveTypeId("Vacation"), "PENDING");
+        long otherEmployeeId = 6L;
+
+        mockMvc.perform(post("/requests/{requestId}/comments", requestId)
+                        .with(forwardedApiPrefix())
+                        .with(authenticatedAs(otherEmployeeId, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"Unauthorized comment.\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from access_log where actor_id = ? and resource = ? and allowed = false",
+                Integer.class, otherEmployeeId,
+                "POST /api/requests/" + requestId + "/comments")).isEqualTo(1);
+
+        // No comment row written
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from request_comments where request_id = ?",
+                Integer.class, requestId)).isZero();
+    }
+
+    @Test
+    void listComments_unauthorizedCaller_returns403AndAccessLogEntry() throws Exception {
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, leaveTypeId("Vacation"), "PENDING");
+        long otherEmployeeId = 6L;
+
+        mockMvc.perform(get("/requests/{requestId}/comments", requestId)
+                        .with(forwardedApiPrefix())
+                        .with(authenticatedAs(otherEmployeeId, "EMPLOYEE")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from access_log where actor_id = ? and resource = ? and allowed = false",
+                Integer.class, otherEmployeeId,
+                "GET /api/requests/" + requestId + "/comments")).isEqualTo(1);
+    }
+
+    @Test
+    void addComment_blankBody_returns400WithoutSavingRow() throws Exception {
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, leaveTypeId("Vacation"), "PENDING");
+
+        for (String blankBody : new String[] {"{\"body\":\"\"}", "{\"body\":\"   \"}", "{}"}) {
+            mockMvc.perform(post("/requests/{requestId}/comments", requestId)
+                            .with(authenticatedAs(MANAGER_ID, "MANAGER"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(blankBody))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        }
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from request_comments where request_id = ?",
+                Integer.class, requestId)).isZero();
+    }
+
+    @Test
+    void addComment_nonExistentRequest_returns404() throws Exception {
+        mockMvc.perform(post("/requests/{requestId}/comments", Long.MAX_VALUE)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"Comment on missing request.\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
+    void listComments_nonExistentRequest_returns404() throws Exception {
+        mockMvc.perform(get("/requests/{requestId}/comments", Long.MAX_VALUE)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
+    void addComment_onTerminalRequest_returns201() throws Exception {
+        for (String status : new String[] {"APPROVED", "REJECTED", "CANCELLED"}) {
+            long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, leaveTypeId("Vacation"), status);
+
+            mockMvc.perform(post("/requests/{requestId}/comments", requestId)
+                            .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"body\":\"Comment on terminal request.\"}"))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.body").value("Comment on terminal request."));
+        }
+    }
+
+    @Test
+    void addComment_appearsAsCommentEntryInHistory() throws Exception {
+        long requestId = createPendingRequest(leaveTypeId("Vacation"), "2026-10-29", "2026-11-03", "History comment");
+
+        mockMvc.perform(post("/requests/{requestId}/comments", requestId)
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"Needs team coverage arranged.\"}"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/requests/{requestId}/history", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[1].type").value("COMMENT"))
+                .andExpect(jsonPath("$[1].actorId").value((int) MANAGER_ID))
+                .andExpect(jsonPath("$[1].actorUsername").value("mgr.chen"))
+                .andExpect(jsonPath("$[1].detail").value("Needs team coverage arranged."));
+    }
+
+    @Test
+    void addComment_idMatchesBetweenCommentsEndpointAndApprovalDetail() throws Exception {
+        long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, leaveTypeId("Vacation"), "PENDING");
+
+        MvcResult postResult = mockMvc.perform(post("/requests/{requestId}/comments", requestId)
+                        .with(authenticatedAs(MANAGER_ID, "MANAGER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"Check coverage.\"}"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        long commentId = ((Number) JsonPath.read(postResult.getResponse().getContentAsString(), "$.id")).longValue();
+
+        // GET /comments returns same id
+        MvcResult listResult = mockMvc.perform(get("/requests/{requestId}/comments", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andReturn();
+        long listedId = ((Number) JsonPath.read(listResult.getResponse().getContentAsString(), "$[0].id")).longValue();
+        assertThat(listedId).isEqualTo(commentId);
+
+        // DB row id matches
+        Long dbId = jdbcTemplate.queryForObject(
+                "select id from request_comments where request_id = ?", Long.class, requestId);
+        assertThat(dbId).isEqualTo(commentId);
     }
 
     private long leaveTypeId(String name) {

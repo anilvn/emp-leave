@@ -1,4 +1,4 @@
-package com.company.leave.approvals;
+package com.company.leave.leave;
 
 import java.time.Instant;
 
@@ -6,10 +6,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Value;
 
-@Schema(name = "Comment", description = "A comment reconstructed from the immutable request history")
+@Schema(name = "Comment", description = "A discussion comment on a leave request")
 @Value
 @Builder
-public class ApprovalComment {
+public class Comment {
 
     long id;
     long requestId;

@@ -147,6 +147,50 @@ public class LeaveRequestController {
     }
 
     @Operation(
+            summary = "List comments on a leave request",
+            description = "Returns all discussion comments, oldest first. Visible to the request owner, "
+                    + "the owner's direct manager, and HR.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "All comments on the request, oldest first"),
+        @ApiResponse(responseCode = "401", description = "No valid access_token cookie"),
+        @ApiResponse(responseCode = "403", description = "Caller is outside the request's permitted scope",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "404", description = "Request not found",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @GetMapping("/{requestId}/comments")
+    public List<Comment> listComments(@PathVariable long requestId) {
+        return leaveRequestService.listComments(requestId);
+    }
+
+    @Operation(
+            summary = "Add a discussion comment to a leave request",
+            description = "Posts a comment visible to the request owner, the owner's direct manager, and HR. "
+                    + "Comments may be added regardless of request status. An immutable audit event is written.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "201", description = "Comment created"),
+        @ApiResponse(responseCode = "400", description = "Blank or missing body",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "401", description = "No valid access_token cookie"),
+        @ApiResponse(responseCode = "403", description = "Caller is outside the request's permitted scope",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "404", description = "Request not found",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @PostMapping("/{requestId}/comments")
+    public ResponseEntity<Comment> addComment(
+            @PathVariable long requestId,
+            @Valid @RequestBody CommentCreateRequest request) {
+        Comment comment = leaveRequestService.addComment(requestId, request.getBody());
+        return ResponseEntity.status(HttpStatus.CREATED).body(comment);
+    }
+
+    @Operation(
             summary = "Cancel a pending leave request",
             description = "Only the request owner may cancel a pending request. Reserved days are released.")
     @ApiResponses({

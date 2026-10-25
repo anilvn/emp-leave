@@ -40,6 +40,7 @@ public class LeaveRequestService {
     private static final ObjectMapper AUDIT_DETAILS_MAPPER = new ObjectMapper();
 
     private final LeaveRequestRepository leaveRequestRepository;
+    private final RequestCommentRepository requestCommentRepository;
     private final LeaveTypeService leaveTypeService;
     private final BalanceService balanceService;
     private final UserService userService;
@@ -48,6 +49,7 @@ public class LeaveRequestService {
     private final AccessPolicy accessPolicy;
 
     LeaveRequestService(LeaveRequestRepository leaveRequestRepository,
+                        RequestCommentRepository requestCommentRepository,
                         LeaveTypeService leaveTypeService,
                         BalanceService balanceService,
                         UserService userService,
@@ -55,6 +57,7 @@ public class LeaveRequestService {
                         NotificationService notificationService,
                         AccessPolicy accessPolicy) {
         this.leaveRequestRepository = leaveRequestRepository;
+        this.requestCommentRepository = requestCommentRepository;
         this.leaveTypeService = leaveTypeService;
         this.balanceService = balanceService;
         this.userService = userService;
@@ -116,6 +119,72 @@ public class LeaveRequestService {
         return events.stream()
                 .map(event -> toHistoryEntry(event, actorUsernames.get(event.actorId())))
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<Comment> listComments(long requestId) {
+        LeaveRequest request = leaveRequestRepository.findById(requestId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        ErrorCode.NOT_FOUND,
+                        "Leave request " + requestId + " does not exist."));
+        accessPolicy.requireOwnerManagerOrHr(request.getEmployeeId(), request.getApproverId());
+        List<RequestComment> comments =
+                requestCommentRepository.findByRequestIdOrderByCreatedAtAscIdAsc(requestId);
+        if (comments.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, String> authorUsernames = userService.getUsernamesByIds(
+                comments.stream().map(RequestComment::getAuthorId).distinct().toList());
+        return comments.stream()
+                .map(comment -> Comment.builder()
+                        .id(comment.getId())
+                        .requestId(comment.getRequestId())
+                        .authorId(comment.getAuthorId())
+                        .authorUsername(authorUsernames.get(comment.getAuthorId()))
+                        .body(comment.getBody())
+                        .createdAt(comment.getCreatedAt())
+                        .build())
+                .toList();
+    }
+
+    @Transactional
+    public Comment addComment(long requestId, String body) {
+        LeaveRequest request = leaveRequestRepository.findById(requestId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        ErrorCode.NOT_FOUND,
+                        "Leave request " + requestId + " does not exist."));
+        accessPolicy.requireOwnerManagerOrHr(request.getEmployeeId(), request.getApproverId());
+        if (body == null || body.isBlank()) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    ErrorCode.VALIDATION_FAILED,
+                    "Comment body must not be blank.");
+        }
+        long authorId = accessPolicy.currentUserId();
+        RequestComment saved = requestCommentRepository.save(
+                RequestComment.builder()
+                        .requestId(requestId)
+                        .authorId(authorId)
+                        .body(body)
+                        .createdAt(java.time.Instant.now())
+                        .build());
+        auditService.recordEvent(
+                "REQUEST_COMMENT",
+                saved.getId(),
+                "REQUEST_COMMENT_ADDED",
+                authorId,
+                encodeCommentDetails(requestId, body));
+        String authorUsername = userService.getUsernamesByIds(List.of(authorId)).get(authorId);
+        return Comment.builder()
+                .id(saved.getId())
+                .requestId(saved.getRequestId())
+                .authorId(saved.getAuthorId())
+                .authorUsername(authorUsername)
+                .body(saved.getBody())
+                .createdAt(saved.getCreatedAt())
+                .build();
     }
 
     @Transactional
@@ -426,6 +495,16 @@ public class LeaveRequestService {
             return AUDIT_DETAILS_MAPPER.writeValueAsString(java.util.Map.of("detail", detail));
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("Could not encode request history audit details.", ex);
+        }
+    }
+
+    private String encodeCommentDetails(long requestId, String body) {
+        try {
+            return AUDIT_DETAILS_MAPPER.writeValueAsString(java.util.Map.of(
+                    "requestId", requestId,
+                    "comment", body));
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Could not encode request comment audit details.", ex);
         }
     }
 

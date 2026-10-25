@@ -64,6 +64,7 @@ class ApprovalControllerIntegrationTest {
         jdbcTemplate.update("delete from active_sessions");
         jdbcTemplate.update("delete from notifications");
         jdbcTemplate.update("delete from balance_ledger");
+        jdbcTemplate.update("delete from request_comments");
         jdbcTemplate.update("delete from leave_requests");
         jdbcTemplate.update("""
                 update leave_balances balance
@@ -101,15 +102,21 @@ class ApprovalControllerIntegrationTest {
                 Instant.parse("2026-10-20T09:00:00Z"));
         insertHistory(firstRequest, "LEAVE_REQUEST_EDITED", EMPLOYEE_ID,
                 "{\"detail\":\"Updated the dates.\"}", Instant.parse("2026-10-21T09:00:00Z"));
-        insertHistoryForEntity(firstRequest + 1000, "REQUEST_COMMENT_ADDED", MANAGER_ID,
+        // For history: audit events with requestId in JSON are joined into the timeline.
+        // For comments: rows in request_comments are the authoritative source (Story 3.5).
+        long firstCommentId = insertComment(firstRequest, MANAGER_ID,
+                "Please confirm coverage.", Instant.parse("2026-10-22T09:00:00Z"));
+        insertHistoryForEntity(firstCommentId, "REQUEST_COMMENT_ADDED", MANAGER_ID,
                 "{\"requestId\":" + firstRequest + ",\"comment\":\"Please confirm coverage.\"}",
                 Instant.parse("2026-10-22T09:00:00Z"));
-        insertHistoryForEntity(firstRequest + 1001, "REQUEST_COMMENT_ADDED", EMPLOYEE_ID,
+        long secondCommentId = insertComment(firstRequest, EMPLOYEE_ID,
+                "Coverage is arranged.", Instant.parse("2026-10-23T09:00:00Z"));
+        insertHistoryForEntity(secondCommentId, "REQUEST_COMMENT_ADDED", EMPLOYEE_ID,
                 "{\"requestId\":" + firstRequest + ",\"comment\":\"Coverage is arranged.\"}",
                 Instant.parse("2026-10-23T09:00:00Z"));
-        insertHistoryForEntity(otherTeamRequest + 1000, "REQUEST_COMMENT_ADDED", MANAGER_ID,
-                "{\"requestId\":" + otherTeamRequest + ",\"comment\":\"Other request must not leak.\"}",
-                Instant.parse("2026-10-22T12:00:00Z"));
+        // Comment on another team's request must not leak into firstRequest's comments.
+        insertComment(otherTeamRequest, MANAGER_ID,
+                "Other request must not leak.", Instant.parse("2026-10-22T12:00:00Z"));
 
         MvcResult result = mockMvc.perform(get("/approvals/pending")
                         .with(authenticatedAs(MANAGER_ID, "MANAGER")))
@@ -172,23 +179,31 @@ class ApprovalControllerIntegrationTest {
                         "2026-10-21T09:00:00Z",
                         "2026-10-22T09:00:00Z",
                         "2026-10-23T09:00:00Z");
-        assertThat(JsonPath.<Number>read(body, "$[0].comments[0].id").longValue()).isPositive();
-        assertThat(JsonPath.<Number>read(body, "$[0].comments[1].id").longValue()).isPositive();
+        assertThat(JsonPath.<Number>read(body, "$[0].comments[0].id").longValue()).isEqualTo(firstCommentId);
+        assertThat(JsonPath.<Number>read(body, "$[0].comments[1].id").longValue()).isEqualTo(secondCommentId);
         assertThat(otherTeamRequest).isNotEqualTo(firstRequest);
         assertThat(managerOwnRequest).isNotEqualTo(firstRequest);
     }
 
     @Test
-    void legacyCommentWithoutBodyUsesHistoryFallback() throws Exception {
+    void auditOnlyCommentEventAppearsInHistoryButNotInCommentsList() throws Exception {
+        // Story 3.5: comments come from request_comments (not audit_events).
+        // An audit event for REQUEST_COMMENT_ADDED without a matching request_comments row
+        // still appears in history (the JSONB requestId join picks it up) but not in comments.
         long requestId = insertRequest(EMPLOYEE_ID, MANAGER_ID, leaveTypeId("Vacation"),
                 "2026-10-29", "2026-11-03");
         insertHistoryForEntity(requestId + 1000, "REQUEST_COMMENT_ADDED", MANAGER_ID,
-                "{\"requestId\":" + requestId + "}", Instant.parse("2026-10-22T09:00:00Z"));
+                "{\"requestId\":" + requestId + ",\"comment\":\"Audit-only comment.\"}",
+                Instant.parse("2026-10-22T09:00:00Z"));
 
         mockMvc.perform(get("/approvals/pending").with(authenticatedAs(MANAGER_ID, "MANAGER")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].comments.length()").value(1))
-                .andExpect(jsonPath("$[0].comments[0].body").value("Event details were not recorded."));
+                // comments list is empty — no request_comments row exists
+                .andExpect(jsonPath("$[0].comments.length()").value(0))
+                // history contains the COMMENT entry from the audit event
+                .andExpect(jsonPath("$[0].history.length()").value(1))
+                .andExpect(jsonPath("$[0].history[0].type").value("COMMENT"))
+                .andExpect(jsonPath("$[0].history[0].detail").value("Audit-only comment."));
     }
 
     @Test
@@ -798,6 +813,14 @@ class ApprovalControllerIntegrationTest {
                 """,
                 action.equals("REQUEST_COMMENT_ADDED") ? "REQUEST_COMMENT" : "LEAVE_REQUEST",
                 entityId, action, actorId, detailsJson, Timestamp.from(createdAt));
+    }
+
+    private long insertComment(long requestId, long authorId, String body, Instant createdAt) {
+        return jdbcTemplate.queryForObject("""
+                insert into request_comments (request_id, author_id, body, created_at)
+                values (?, ?, ?, ?)
+                returning id
+                """, Long.class, requestId, authorId, body, Timestamp.from(createdAt));
     }
 
     private long leaveTypeId(String name) {

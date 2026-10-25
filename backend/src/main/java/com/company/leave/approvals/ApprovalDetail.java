@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import com.company.leave.balances.BalanceResponse;
+import com.company.leave.leave.Comment;
 import com.company.leave.leave.HistoryEntry;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
@@ -60,7 +61,7 @@ public class ApprovalDetail {
     @Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     BalanceResponse balance;
     @Schema(requiredMode = Schema.RequiredMode.REQUIRED)
-    List<ApprovalComment> comments;
+    List<Comment> comments;
     @Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     List<HistoryEntry> history;
 }
