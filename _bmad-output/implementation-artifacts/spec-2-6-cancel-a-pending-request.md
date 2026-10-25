@@ -106,6 +106,19 @@ Implementation follows the layered modular monolith's direct service-call patter
 | A request whose reserved balance is smaller than its working-day count caused an unclassified `IllegalArgumentException` during cancellation. | medium | patch | Reproduced by reducing the balance reservation before cancellation; `LeaveBalance.adjustReservation()` rejected the negative result and the exception had no API-code mapping. Added an explicit `409 INSUFFICIENT_BALANCE` guard and rollback assertions in `cancellingWithInsufficientReservedDaysReturnsConflictWithoutMutation`; all 43 integration tests passed. |
 | The missing-balance `409` case is not named in the story's acceptance criteria. | medium | — | Rejected: the suggested remedy requires changing this build's spec, which review rules prohibit; the existing matrix cases are covered and this additional inconsistent-state behavior remains an implementation safeguard, not a missing acceptance criterion. |
 
+| Finding | Verdict | Route | Evidence |
+|---|---|---|---|
+| The refreshed Epic 2 context omits the request status filter and history endpoint requirements. | medium | defer | carried: This is the same context omission recorded above; the earlier triage deferred reconciliation with source requirements. |
+| The refreshed Epic 2 context omits notification payload details and owner-only visibility. | medium | defer | carried: This is the same context omission recorded above; the earlier triage deferred reconciliation with source requirements. |
+| OpenAPI documents `/auth/me` and `/leave-types` without backend endpoints. | medium | defer | carried: The prior row records these as separate planned backend follow-up, outside cancellation. |
+| OpenAPI advertises username fields that response DTOs do not return. | medium | defer | carried: The prior row records this as a separate backend contract follow-up. |
+| The `ApprovalDetail` example omits username fields present in referenced schemas. | low | defer | carried: The prior row records the example gap as unrelated frontend/backend follow-up. |
+| The matrix omits the defensive missing-balance failure added by the implementation. | medium | — | carried: The prior row rejected changing the human-approved spec; the added 409 safeguard remains documented and tested. |
+| The adversarial architecture review still presents findings addressed by the revised spine. | medium | defer | carried: Prior triage rows record the stale H1/H2/H3/H5/H6 claims individually. |
+| The architecture spine says `final` while its adversarial review says `NOT READY`. | medium | defer | carried: The prior row records this architecture-artifact conflict as separate work. |
+| The architecture lists an audit data-version signal without defining its invalidating writes. | medium | defer | carried: The prior row records this frontend cache invalidation gap as separate work. |
+| The architecture capability table does not map FR26. | low | defer | carried: The prior row records this architecture completeness gap as separate work. |
+
 ## Verification
 
 **Commands:**

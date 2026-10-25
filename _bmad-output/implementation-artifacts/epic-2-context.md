@@ -4,7 +4,7 @@
 
 ## Goal
 
-This epic delivers the employee-facing leave flow end to end: employees can see valid balances, submit whole-day leave requests against those balances, track status and history, edit or cancel only while pending, and review their own notifications. It matters because it proves the core workflow of the POC without waiting for approval or HR features: a request is submitted against a real balance, reserved correctly, audited, and surfaced to the employee and manager with the necessary access controls. Planning note: the planning artifacts include the PRD and backend architecture spine, but no separate UX/design or product brief artifact exists, so this context stays focused on the backend contract and operational rules for the backend-only scope.
+Epic 2 gives employees a complete, self-serve leave journey: they can submit requests against real balances, see their own history and notifications, adjust pending requests, and cancel them without leaving the system in an inconsistent state. The epic matters because it proves the core employee workflow end to end: requests count working days correctly, balances reserve and release days as status changes, and the approval path still has a trustworthy trail of what happened.
 
 ## Stories
 
@@ -18,38 +18,33 @@ This epic delivers the employee-facing leave flow end to end: employees can see 
 
 ## Requirements & Constraints
 
-- Employees can request leave by type from the seeded catalogue (Vacation, Sick, Parental, Sabbatical), limited to whole-day ranges.
-- Start and end dates must be valid date-only values, endDate >= startDate, and the request must produce at least one working day when counted Monday through Friday only; public holidays are ignored as part of the shared working-day utility.
-- Each request records the employee, approver (their manager), leave type, optional notes, status, and submission time; the request never disappears on cancel and remains visible in history and list views.
-- Leave balances are tracked per user and leave type as totalDays, reservedDays, and availableDays = totalDays - reservedDays. Requests reserve the working-day amount on submit, and edits and cancellations release or re-reserve the correct amount within the same transaction.
-- Submission is rejected with INSUFFICIENT_BALANCE when requested working days exceed currently available days. This check is service-layer enforced and aligned with the rule that reserved days already held by pending requests count against the entitlement.
-- Employees can view only their own requests and notification history; managers can see their direct reports' requests when the scope permits; HR admins can access any user data without scope filtering. In all unauthorized cases, the access check fails with ACCESS_DENIED and an access-log entry is written.
-- GET /api/requests supports an optional status filter (PENDING, APPROVED, REJECTED, CANCELLED); GET /api/requests/{id}/history returns a timeline of user-visible events (submission, edits, comments, cancellation, and later decision events from Epic 3). The timeline is a core audit/read view, not just raw DB rows.
-- A notification is created when a report submits a leave request; it is addressed to the approver with the leave type, date range, working-day count, status, and request link. The user can read only their own notifications, and the same template logic is later reused by approval/rejection notifications.
-- Every state-changing transaction must write an audit event with the acting user and timestamp; request/balance changes must remain in a consistent transaction and must never be silently missing a ledger or audit record.
-- The implementation follows backend-only, package-by-feature conventions: direct synchronous calls between service layers, no event bus, and the domain ownership of tables remains explicit (leave owns requests/types, balances owns balances/ledger, audit owns audit/access logs, notifications owns notifications, security owns active sessions).
+- Employees can request the seeded leave types Vacation, Sick, Parental, and Sabbatical, using whole-day date ranges. Start and end dates are required; the end cannot precede the start, and a range with zero working days is invalid. Count Monday–Friday inclusive and ignore public holidays.
+- Requests store optional notes and one of `PENDING`, `APPROVED`, `REJECTED`, or `CANCELLED`. A cancelled request is retained and remains visible.
+- `availableDays = totalDays - reservedDays`; missing balance rows behave as zero, not unlimited entitlement. Pending requests reserve days at submission, and successful edits recalculate the hold while excluding that request's existing reservation from the availability check. Cancellation releases exactly its held days.
+- Only the owner may edit or cancel, and only while the request is pending. The leave type cannot be changed by editing. Invalid date input returns `VALIDATION_FAILED`; an insufficient balance returns `INSUFFICIENT_BALANCE`; an illegal state change returns `INVALID_TRANSITION`. A rejected mutation leaves the request and balance unchanged.
+- Apply one `AccessPolicy` to every endpoint: employees access their own requests and notifications; managers may view direct reports' requests when authorized; HR may access all applicable records. Editing and cancellation remain owner-only. Denials return `ACCESS_DENIED` and are recorded in the access log.
+- Every request state change records its actor and timestamp. Request history is derived from audit events and ordered oldest first; Epic 2 contributes submission, edit, and cancellation entries, while approval, rejection, and comment entries are added by Epic 3.
+- On submission, the assigned approver receives a DB-backed notification row and log entry. Notifications are best effort: failures are logged and never roll back the request or balance change. No mail server is contacted in this epic.
+- Keep the backend-only layered modular monolith: no event bus, no cross-module repository access, and no business logic in `common`.
 
 ## Technical Decisions
 
-- Architecture follows the backend architecture spine: layered modular monolith with package-by-feature boundaries and direct in-process service calls. Domain modules stay separate in source tree and review discipline, but no Spring Modulith enforcement is required.
-- common remains inert and contains stateless utilities such as the working-day calculator and shared error handling; it does not hold business rules or entity repositories.
-- leave_types and leave_balances are introduced in the epic, with leave_balances carrying a defensive DB CHECK (total_days - reserved_days >= 0) while the service layer remains the actual enforcement point.
-- leave_requests and balance_ledger are written in the same transaction. BalanceService is the single writer of balance/ledger state and records the reservation and release path; the leave module writes its own request and audit row, with explicit actor IDs passed in rather than re-reading security context.
-- Access control is centralized through the access-policy scope model. Requested employee data is resolved by owner, manager, or HR scope using the same authorization flow used across the backend, and no controller-level ad hoc checks are relied on for the core access rules.
-- Notification delivery is intentionally in-process and tolerant: the service logs and returns normally if template rendering or DB writes fail, so a failed notification does not roll back the request or reservation it is reporting.
-- There is no separate UX design contract in the planning artifacts. The relevant interaction contract is backend/API behavior and the PRD's desktop-first accessibility expectations, which remain deferred for frontend planning rather than implemented here.
+- Backend work belongs to `leave`, `balances`, and `notifications`. `leave` owns `leave_types`, `leave_requests`, and `request_comments`; `balances` owns `leave_balances` and `balance_ledger`; `notifications` owns `notifications` and remains a leaf module. Modules communicate only through public service APIs.
+- `BalanceService` is the sole writer of balances and ledger entries. It owns reservation, release, and related ledger writes in the same transaction as the request mutation. Enforce `total_days - reserved_days >= 0` in the service and with a database check constraint.
+- `leave_requests` stores employee, approver, leave type, date range, working-day count, notes, status, submission/decision timestamps, and decision comment. `balance_ledger` records each change with its actor, request context, and timestamp; read ledger/history entries oldest first. Keep request ranges as SQL `DATE`, working-day counts as whole-day integers, and timestamps as `timestamptz`.
+- Keep the working-day calculator as a stateless utility in `common`, reusable by request validation and later reporting without adding business services or persistence there.
+- History is assembled by `leave` using audit data read through `AuditService`; `audit` must not query leave tables. The owning module writes the audit event for its state change and passes actor IDs explicitly across module calls. Audit and access-log records are insert-only.
+- Use RFC 9457 `ProblemDetail` responses with canonical error codes, including `ACCESS_DENIED`, `INSUFFICIENT_BALANCE`, and `INVALID_TRANSITION`. Authentication and authorization reuse Epic 1's user/role policy and `AccessPolicy`.
+- For the Angular frontend, keep requests as a shell-agnostic feature mounted in employee, manager, and HR shells. Feature API state belongs in route-scoped services using signals and `httpResource`; request mutations invalidate both request and balance data. Use Signal Forms, server-calculated working-day and availability values, and the generated API types rather than duplicating schemas.
 
 ## UX & Interaction Patterns
 
-- Employee flows: see the current leave balance for each type, submit a request with start/end dates and notes, review a filterable list of own requests, and edit or cancel while still pending.
-- Manager flow: receives a notification when a direct report submits a request; the request is still resolved in the API as an approver-owned object, with scope checks requiring manager-of-report access.
-- History flow: a request detail exposes a readable timeline of state changes and comments in chronological order so an employee can understand what happened without using raw database records.
-- Product constraints from the PRD still apply: desktop-first, semantic HTML, labelled fields, and keyboard-accessible primary flows, but these are deferred to frontend design work because no UX contract exists in the planning artifacts.
+- The requests feature provides the employee's request list, status filtering, request details/history, submission, pending edit/cancel, and balance views across the role shells. Request details use the same canonical route for owner, direct manager, and HR where authorized.
+- Show server-provided `workingDays` and `availableDays`; do not calculate them in the UI. Use native date inputs and send `yyyy-MM-dd` unchanged, trim optional text and send blank values as `null`. Reuse the submit form for edits with leave type read-only.
+- Surface documented validation and balance/transition errors inline where appropriate; render access-denied/read errors once at page level. Label all form fields and preserve keyboard-accessible main flows.
+- Present request history chronologically, oldest first, with readable event details and actor/time context.
 
 ## Cross-Story Dependencies
 
-- Story 2.1 is the foundation: it creates the leave-type and balance tables and seeds the starting entitlement data, which all later stories read.
-- Story 2.2 depends on the balance model and the shared working-day logic; it introduces the actual reservation flow and the request/ledger/audit write path that Stories 2.3–2.7 consume.
-- Story 2.3 relies on a successful submission to create the approver notification and on the request model for a request-specific notification link and owned-user filtering.
-- Stories 2.4–2.7 depend on the request, access, and history model created in 2.2, and they all rely on the Epic 1 access and security foundation (login, RBAC, audit log, and session rules).
-- Epic 3 extends this epic's history and notification patterns for approval/rejection and comments, but Epic 2 remains functionally standalone once Epic 1 is present: employees can submit, edit, cancel, and track leave without needing later epics.
+- Epic 2 depends on Epic 1 for the user model, role/manager relationships, JWT/session security, immutable audit and access-log foundations, and the shared `AccessPolicy`.
+- Epic 2 establishes the request lifecycle required by Epic 3's approval decisions, comments, and decision notifications. Its history and comment model also support later manager/HR history and audit-reporting work.
