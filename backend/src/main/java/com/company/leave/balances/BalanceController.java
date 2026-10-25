@@ -15,11 +15,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/balances")
-@Tag(name = "Balances", description = "The authenticated user's leave balances")
+@Tag(name = "Balances", description = "Leave balance queries — personal view for all roles, full view for HR")
 public class BalanceController {
 
     private final BalanceService balanceService;
@@ -28,6 +29,24 @@ public class BalanceController {
     BalanceController(BalanceService balanceService, AccessPolicy accessPolicy) {
         this.balanceService = balanceService;
         this.accessPolicy = accessPolicy;
+    }
+
+    @Operation(
+            summary = "Get all balances",
+            description = "HR_ADMIN only (FR27). Returns every user's balance for every leave type. "
+                    + "Optionally filtered by userId.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Balances, optionally filtered by user"),
+        @ApiResponse(responseCode = "401", description = "No valid access_token cookie"),
+        @ApiResponse(responseCode = "403", description = "Caller is not HR_ADMIN",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @GetMapping
+    public ResponseEntity<List<BalanceResponse>> getAllBalances(
+            @RequestParam(required = false) Long userId) {
+        accessPolicy.requireRole(Role.HR_ADMIN);
+        return ResponseEntity.ok(balanceService.getAllBalances(userId));
     }
 
     @Operation(

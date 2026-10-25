@@ -15,6 +15,9 @@ interface LeaveBalanceRepository extends Repository<LeaveBalance, LeaveBalanceId
     @Query("select balance from LeaveBalance balance where balance.id.userId = :userId")
     List<LeaveBalance> findForUser(@Param("userId") long userId);
 
+    @Query("select balance from LeaveBalance balance")
+    List<LeaveBalance> findAll();
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<LeaveBalance> findById(LeaveBalanceId id);
 

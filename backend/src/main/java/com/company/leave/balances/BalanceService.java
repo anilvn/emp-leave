@@ -187,6 +187,22 @@ public class BalanceService {
                 Instant.now()));
     }
 
+    @Transactional(readOnly = true)
+    public List<BalanceResponse> getAllBalances(Long userId) {
+        List<LeaveBalance> rows = userId != null
+                ? leaveBalanceRepository.findForUser(userId)
+                : leaveBalanceRepository.findAll();
+        return rows.stream()
+                .map(b -> BalanceResponse.builder()
+                        .userId(b.getId().getUserId())
+                        .leaveTypeId(b.getId().getLeaveTypeId())
+                        .totalDays(b.getTotalDays())
+                        .reservedDays(b.getReservedDays())
+                        .availableDays(b.getTotalDays() - b.getReservedDays())
+                        .build())
+                .toList();
+    }
+
     private BalanceResponse toBalanceResponse(long userId, LeaveTypeResponse leaveType, LeaveBalance balance) {
         int totalDays = balance == null ? 0 : balance.getTotalDays();
         int reservedDays = balance == null ? 0 : balance.getReservedDays();

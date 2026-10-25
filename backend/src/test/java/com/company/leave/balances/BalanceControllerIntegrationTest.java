@@ -247,6 +247,54 @@ class BalanceControllerIntegrationTest {
                 .andExpect(jsonPath("$.code").value("PASSWORD_CHANGE_REQUIRED"));
     }
 
+    // --- Story 4.1: GET /balances (HR only) ---
+
+    @Test
+    void hrAdminGetsAllBalancesForAllUsers() throws Exception {
+        MvcResult result = mockMvc.perform(get("/balances").with(authenticatedAs(1L, "HR_ADMIN")))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        List<Map<String, Object>> rows = balanceRows(result);
+        assertThat(rows).isNotEmpty();
+        int userCount = jdbcTemplate.queryForObject("select count(*) from users", Integer.class);
+        int typeCount = jdbcTemplate.queryForObject("select count(*) from leave_types", Integer.class);
+        assertThat(rows).hasSize(userCount * typeCount);
+        assertThat(rows).allSatisfy(row ->
+                assertThat(row).containsKeys("userId", "leaveTypeId", "totalDays", "reservedDays", "availableDays"));
+    }
+
+    @Test
+    void hrAdminGetsBalancesFilteredByUserId() throws Exception {
+        MvcResult result = mockMvc.perform(get("/balances?userId=5").with(authenticatedAs(1L, "HR_ADMIN")))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        List<Map<String, Object>> rows = balanceRows(result);
+        assertThat(rows).isNotEmpty();
+        assertThat(rows).allSatisfy(row ->
+                assertThat(number(row, "userId").longValue()).isEqualTo(5L));
+    }
+
+    @Test
+    void employeeIsRefusedFromGetAllBalances() throws Exception {
+        mockMvc.perform(get("/balances").with(authenticatedAs(5L, "EMPLOYEE")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+    }
+
+    @Test
+    void managerIsRefusedFromGetAllBalances() throws Exception {
+        mockMvc.perform(get("/balances").with(authenticatedAs(3L, "MANAGER")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+    }
+
+    @Test
+    void unauthenticatedCallerGets401ForAllBalances() throws Exception {
+        mockMvc.perform(get("/balances")).andExpect(status().isUnauthorized());
+    }
+
     private long leaveTypeId(String name) {
         return jdbcTemplate.queryForObject("select id from leave_types where name = ?", Long.class, name);
     }
