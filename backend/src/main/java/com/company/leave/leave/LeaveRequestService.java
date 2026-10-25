@@ -133,6 +133,35 @@ public class LeaveRequestService {
     }
 
     @Transactional
+    public LeaveRequestResponse cancel(long requestId) {
+        LeaveRequest request = leaveRequestRepository.findByIdForUpdate(requestId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        ErrorCode.NOT_FOUND,
+                        "Leave request " + requestId + " does not exist."));
+        accessPolicy.requireOwner(request.getEmployeeId());
+        if (request.getStatus() != RequestStatus.PENDING) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.INVALID_TRANSITION,
+                    "Request " + requestId + " is " + request.getStatus()
+                            + " and can no longer be cancelled.");
+        }
+
+        long actorId = accessPolicy.currentUserId();
+        balanceService.releaseReservation(
+                request.getEmployeeId(),
+                request.getLeaveTypeId(),
+                request.getWorkingDays(),
+                actorId,
+                requestId);
+        request.cancelPending();
+        leaveRequestRepository.save(request);
+        auditService.recordEvent("LEAVE_REQUEST", requestId, "LEAVE_REQUEST_CANCELLED", actorId, null);
+        return toResponse(request);
+    }
+
+    @Transactional
     public LeaveRequestResponse submit(LeaveRequestCreateRequest request, long actorId) {
         // 1. Validate leave type
         String leaveTypeName = leaveTypeService.findNameById(request.getLeaveTypeId())

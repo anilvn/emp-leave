@@ -127,4 +127,27 @@ public class LeaveRequestController {
             @Valid @RequestBody LeaveRequestUpdateRequest request) {
         return leaveRequestService.update(requestId, request);
     }
+
+    @Operation(
+            summary = "Cancel a pending leave request",
+            description = "Only the request owner may cancel a pending request. Reserved days are released.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Cancelled request",
+                content = @Content(mediaType = "application/json",
+                        schema = @Schema(implementation = LeaveRequestResponse.class))),
+        @ApiResponse(responseCode = "401", description = "No valid access_token cookie"),
+        @ApiResponse(responseCode = "403", description = "Caller is not the request owner",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "404", description = "Request not found",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class))),
+        @ApiResponse(responseCode = "409", description = "Request is no longer PENDING or its balance row is missing",
+                content = @Content(mediaType = "application/problem+json",
+                        schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @PostMapping("/{requestId}/cancel")
+    public LeaveRequestResponse cancelLeaveRequest(@PathVariable long requestId) {
+        return leaveRequestService.cancel(requestId);
+    }
 }

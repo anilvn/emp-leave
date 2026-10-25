@@ -505,6 +505,8 @@ paths:
                 submittedAt: "2026-10-22T09:15:00Z"
                 decidedAt: null
                 decisionComment: null
+        '401':
+          description: No valid access_token cookie
         '403':
           description: Caller is not the owner of this request
           content:
@@ -518,19 +520,33 @@ paths:
                 detail: Only the request's owner may cancel it.
                 instance: /api/requests/101/cancel
                 code: ACCESS_DENIED
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
-          description: Request is no longer PENDING
+          description: Request is no longer PENDING or its balance row is missing
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetail'
-              example:
-                type: about:blank
-                title: Invalid transition
-                status: 409
-                detail: Request 101 is already APPROVED and cannot be cancelled.
-                instance: /api/requests/101/cancel
-                code: INVALID_TRANSITION
+              examples:
+                invalidTransition:
+                  summary: Request is no longer PENDING
+                  value:
+                    type: about:blank
+                    title: Invalid transition
+                    status: 409
+                    detail: Request 101 is already APPROVED and cannot be cancelled.
+                    instance: /api/requests/101/cancel
+                    code: INVALID_TRANSITION
+                missingBalance:
+                  summary: The request's balance row is missing
+                  value:
+                    type: about:blank
+                    title: Insufficient balance
+                    status: 409
+                    detail: No balance row exists for userId=5 leaveTypeId=1.
+                    instance: /api/requests/101/cancel
+                    code: INSUFFICIENT_BALANCE
 
   /requests/{requestId}/history:
     parameters:

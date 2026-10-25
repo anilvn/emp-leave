@@ -115,6 +115,31 @@ public class BalanceService {
                 reason + ": reserved updated amount", actorId, requestId, now));
     }
 
+    /**
+     * Releases a request's held days and records the matching ledger entry.
+     * Must be called inside the request's transaction.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void releaseReservation(long userId, long leaveTypeId, int workingDays,
+                                   long actorId, long requestId) {
+        if (workingDays <= 0) {
+            throw new IllegalArgumentException("workingDays must be positive");
+        }
+
+        LeaveBalanceId balanceId = new LeaveBalanceId(userId, leaveTypeId);
+        LeaveBalance balance = leaveBalanceRepository.findById(balanceId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.CONFLICT, ErrorCode.INSUFFICIENT_BALANCE,
+                        "No balance row exists for userId=" + userId + " leaveTypeId=" + leaveTypeId));
+
+        balance.adjustReservation(-workingDays);
+        leaveBalanceRepository.save(balance);
+
+        balanceLedgerRepository.save(new BalanceLedger(
+                userId, leaveTypeId, -workingDays, LedgerKind.RELEASE,
+                "Cancelled leave request " + requestId, actorId, requestId, Instant.now()));
+    }
+
     private BalanceResponse toBalanceResponse(long userId, LeaveTypeResponse leaveType, LeaveBalance balance) {
         int totalDays = balance == null ? 0 : balance.getTotalDays();
         int reservedDays = balance == null ? 0 : balance.getReservedDays();

@@ -58,6 +58,12 @@ class OpenApiDocsIntegrationTest {
                         .value("#/components/schemas/LeaveRequestUpdate"))
                 .andExpect(jsonPath("$.paths['/requests/{requestId}'].put.responses['200'].content['application/json'].schema.$ref")
                         .value("#/components/schemas/LeaveRequest"))
+                .andExpect(jsonPath("$.paths['/requests/{requestId}/cancel'].post").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}/cancel'].post.responses['200']").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}/cancel'].post.responses['401']").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}/cancel'].post.responses['403']").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}/cancel'].post.responses['404']").exists())
+                .andExpect(jsonPath("$.paths['/requests/{requestId}/cancel'].post.responses['409']").exists())
                 .andExpect(jsonPath("$.paths['/users/{userId}/reset-password'].post").exists());
     }
 
@@ -100,6 +106,31 @@ class OpenApiDocsIntegrationTest {
                     .isEqualTo("INVALID_TRANSITION");
             assertThat(problemCode(mapAt(responses, "409"), "content", "application/problem+json",
                     "examples", "insufficientBalance", "value"))
+                    .isEqualTo("INSUFFICIENT_BALANCE");
+        }
+    }
+
+    @Test
+    void handWrittenContractDocumentsCancellationResponses() throws Exception {
+        try (InputStream input = getClass().getResourceAsStream("/openapi.yaml")) {
+            assertThat(input).isNotNull();
+            Map<?, ?> document = new Yaml().load(input);
+            Map<?, ?> paths = (Map<?, ?>) document.get("paths");
+            Map<?, ?> cancelPath = (Map<?, ?>) paths.get("/requests/{requestId}/cancel");
+            Map<?, ?> cancelOperation = (Map<?, ?>) cancelPath.get("post");
+            Map<?, ?> responses = (Map<?, ?>) cancelOperation.get("responses");
+
+            assertThat(responses.keySet().stream().map(Object::toString).toList())
+                    .contains("200", "401", "403", "404", "409");
+            assertThat(schemaRef(mapAt(responses, "200"), "content", "application/json", "schema"))
+                    .isEqualTo("#/components/schemas/LeaveRequest");
+            assertThat(problemCode(mapAt(responses, "403"), "content", "application/problem+json", "example"))
+                    .isEqualTo("ACCESS_DENIED");
+            assertThat(problemCode(mapAt(responses, "409"), "content", "application/problem+json",
+                    "examples", "invalidTransition", "value"))
+                    .isEqualTo("INVALID_TRANSITION");
+            assertThat(problemCode(mapAt(responses, "409"), "content", "application/problem+json",
+                    "examples", "missingBalance", "value"))
                     .isEqualTo("INSUFFICIENT_BALANCE");
         }
     }

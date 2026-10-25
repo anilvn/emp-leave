@@ -42,3 +42,19 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-5-edit-a-pending-request.md`
   summary: Align hand-written OpenAPI 401 response documentation across protected operations.
   evidence: The PUT operation omits an explicit 401 response even though callers must satisfy the global cookie-auth requirement; this omission predates the story implementation and should be resolved consistently across the API contract.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-cancel-a-pending-request.md`
+  summary: Prevent the planned frontend `/auth/me` initializer from reloading the login page repeatedly when no session exists.
+  evidence: The frontend architecture applies its startup initializer before routing, while its interceptor sends any empty-body 401 to a hard reload of `/login`; a signed-out visit to `/login` can therefore repeat the same request and reload. This independent frontend issue is outside Story 2.6.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-cancel-a-pending-request.md`
+  summary: Implement the frontend architecture's planned `/auth/me`, `/leave-types`, and username-enriched response fields.
+  evidence: These operations and fields are present in the OpenAPI document but absent from backend controllers/response DTOs; the frontend architecture explicitly records them as a backend follow-up, so they are not part of this cancellation story.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-cancel-a-pending-request.md`
+  summary: Complete the `ApprovalDetail` OpenAPI example with the username fields present in its referenced response schemas.
+  evidence: The example omits `approverUsername` and the nested comment/history username fields. The frontend architecture already notes that operation-level examples do not yet show the new fields; correcting those independent examples is outside Story 2.6.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-cancel-a-pending-request.md`
+  summary: Clarify in the frontend architecture that FR26 access logging is backend-only and has no frontend feature surface.
+  evidence: The architecture binds FR1–FR31 but does not map FR26 in its capability table, leaving implementers without an explicit boundary. This is independent of cancellation behavior.

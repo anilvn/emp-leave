@@ -84,4 +84,11 @@ class LeaveRequest {
         this.workingDays = workingDays;
         this.notes = notes;
     }
+
+    void cancelPending() {
+        if (status != RequestStatus.PENDING) {
+            throw new IllegalStateException("Only pending requests can be cancelled");
+        }
+        this.status = RequestStatus.CANCELLED;
+    }
 }

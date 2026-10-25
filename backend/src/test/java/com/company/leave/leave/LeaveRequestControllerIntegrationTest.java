@@ -67,6 +67,7 @@ class LeaveRequestControllerIntegrationTest {
         jdbcTemplate = new JdbcTemplate(dataSource);
         dropNotificationFailureTrigger();
         dropEditAuditFailureTrigger();
+        dropCancelAuditFailureTrigger();
         jdbcTemplate.update("delete from active_sessions");
         jdbcTemplate.update(
                 "update users set must_change_password = false where id in (?, ?)", EMPLOYEE_ID, MANAGER_ID);
@@ -76,6 +77,7 @@ class LeaveRequestControllerIntegrationTest {
     void cleanUp() {
         dropNotificationFailureTrigger();
         dropEditAuditFailureTrigger();
+        dropCancelAuditFailureTrigger();
         // Notification and balance-ledger rows reference requests, so delete them first.
         jdbcTemplate.update("delete from notifications");
         jdbcTemplate.update("delete from balance_ledger");
@@ -1034,6 +1036,162 @@ class LeaveRequestControllerIntegrationTest {
                 Integer.class, requestId)).isZero();
     }
 
+    @Test
+    void cancelPendingRequestReleasesDaysAuditsAndRemainsVisible() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");
+
+        mockMvc.perform(post("/requests/{requestId}/cancel", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value((int) requestId))
+                .andExpect(jsonPath("$.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.decidedAt").isEmpty());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from leave_requests where id = ?", Integer.class, requestId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select status from leave_requests where id = ?", String.class, requestId)).isEqualTo("CANCELLED");
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isZero();
+
+        MvcResult listedRequests = mockMvc.perform(get("/requests")
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isOk())
+                .andReturn();
+        List<String> visibleStatuses = JsonPath.read(
+                listedRequests.getResponse().getContentAsString(),
+                "$[?(@.id == " + requestId + ")].status");
+        assertThat(visibleStatuses).containsExactly("CANCELLED");
+
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from balance_ledger
+                where request_id = ? and kind = 'RELEASE' and change_days = -4
+                  and actor_id = ? and created_at is not null
+                """, Integer.class, requestId, EMPLOYEE_ID)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from balance_ledger where request_id = ? and kind = 'RELEASE'",
+                Integer.class, requestId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                select count(*) from audit_events
+                where entity = 'LEAVE_REQUEST' and entity_id = ?
+                  and action = 'LEAVE_REQUEST_CANCELLED' and actor_id = ? and created_at is not null
+                """, Integer.class, requestId, EMPLOYEE_ID)).isEqualTo(1);
+
+        long replacementRequestId =
+                createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Replacement");
+        assertThat(replacementRequestId).isNotEqualTo(requestId);
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(4);
+    }
+
+    @Test
+    void cancellationRejectsEveryTerminalStatusWithoutChangingBalanceOrHistory() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");
+
+        for (String terminalStatus : List.of("APPROVED", "REJECTED", "CANCELLED")) {
+            jdbcTemplate.update("update leave_requests set status = ? where id = ?", terminalStatus, requestId);
+
+            mockMvc.perform(post("/requests/{requestId}/cancel", requestId)
+                            .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value("INVALID_TRANSITION"));
+
+            assertThat(jdbcTemplate.queryForObject(
+                    "select status from leave_requests where id = ?", String.class, requestId))
+                    .isEqualTo(terminalStatus);
+            assertThat(jdbcTemplate.queryForObject(
+                    "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                    Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(4);
+            assertThat(jdbcTemplate.queryForObject(
+                    "select count(*) from balance_ledger where request_id = ? and kind = 'RELEASE'",
+                    Integer.class, requestId)).isZero();
+            assertThat(jdbcTemplate.queryForObject(
+                    "select count(*) from audit_events where entity_id = ? and action = 'LEAVE_REQUEST_CANCELLED'",
+                    Integer.class, requestId)).isZero();
+        }
+    }
+
+    @Test
+    void onlyOwnerCanCancelAndDeniedAccessIsLogged() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");
+        long[] actors = {6L, MANAGER_ID, 1L};
+        String[] roles = {"EMPLOYEE", "MANAGER", "HR_ADMIN"};
+
+        for (int index = 0; index < actors.length; index++) {
+            mockMvc.perform(post("/requests/{requestId}/cancel", requestId)
+                            .with(forwardedApiPrefix())
+                            .with(authenticatedAs(actors[index], roles[index])))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+            assertThat(jdbcTemplate.queryForObject(
+                    "select count(*) from access_log where actor_id = ? and resource = ? and allowed = false",
+                    Integer.class, actors[index], "POST /api/requests/" + requestId + "/cancel")).isEqualTo(1);
+        }
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select status from leave_requests where id = ?", String.class, requestId)).isEqualTo("PENDING");
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(4);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from balance_ledger where request_id = ? and kind = 'RELEASE'",
+                Integer.class, requestId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from audit_events where entity_id = ? and action = 'LEAVE_REQUEST_CANCELLED'",
+                Integer.class, requestId)).isZero();
+    }
+
+    @Test
+    void cancellingUnknownRequestReturnsNotFound() throws Exception {
+        mockMvc.perform(post("/requests/{requestId}/cancel", 99999999L)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
+    void cancellationAuditFailureRollsBackStatusReservationAndLedger() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");
+        jdbcTemplate.execute("""
+                create or replace function reject_test_cancel_audit() returns trigger as $$
+                begin
+                    if new.action = 'LEAVE_REQUEST_CANCELLED' then
+                        raise exception 'intentional cancel audit failure';
+                    end if;
+                    return new;
+                end;
+                $$ language plpgsql
+                """);
+        jdbcTemplate.execute("""
+                create trigger reject_test_cancel_audit
+                before insert on audit_events
+                for each row execute function reject_test_cancel_audit()
+                """);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> mockMvc.perform(
+                        post("/requests/{requestId}/cancel", requestId)
+                                .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))))
+                .hasMessageContaining("intentional cancel audit failure");
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select status from leave_requests where id = ?", String.class, requestId)).isEqualTo("PENDING");
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(4);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from balance_ledger where request_id = ? and kind = 'RELEASE'",
+                Integer.class, requestId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from audit_events where entity_id = ? and action = 'LEAVE_REQUEST_CANCELLED'",
+                Integer.class, requestId)).isZero();
+    }
+
     private long leaveTypeId(String name) {
         return jdbcTemplate.queryForObject("select id from leave_types where name = ?", Long.class, name);
     }
@@ -1114,6 +1272,11 @@ class LeaveRequestControllerIntegrationTest {
     private void dropEditAuditFailureTrigger() {
         jdbcTemplate.execute("drop trigger if exists reject_test_edit_audit on audit_events");
         jdbcTemplate.execute("drop function if exists reject_test_edit_audit()");
+    }
+
+    private void dropCancelAuditFailureTrigger() {
+        jdbcTemplate.execute("drop trigger if exists reject_test_cancel_audit on audit_events");
+        jdbcTemplate.execute("drop function if exists reject_test_cancel_audit()");
     }
 
     private RequestPostProcessor forwardedApiPrefix() {
