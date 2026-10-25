@@ -1,0 +1,30 @@
+$kind: http-request
+description: "Generated from cURL: curl -X 'POST' \\\r
+
+  \  'http://localhost:8080/approvals/1/approve' \\\r
+
+  \  -H 'accept: application/json' \\\r
+
+  \  -H 'Content-Type: application/json' \\\r
+
+  \  -H 'Cookie: access_token={{json_web_token_1667}}' \\\r
+
+  \  -d '{\r
+
+  \  \"comment\": \"Enjoy your trip!\"\r
+
+  }'"
+url: http://localhost:8080/approvals/1/approve
+method: POST
+headers:
+  accept: application/json
+  Content-Type: application/json
+  Cookie: access_token={{json_web_token_1667}}
+body:
+  type: json
+  content: "{\r
+
+    \  \"comment\": \"Enjoy your trip!\"\r
+
+    }"
+order: 16000

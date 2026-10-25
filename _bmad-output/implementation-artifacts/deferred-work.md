@@ -86,3 +86,31 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-7-the-history-timeline-on-a-request.md`
   summary: Define pagination or retention behavior if a request accumulates a very large history.
   evidence: Story 2.7 specifies a complete oldest-first timeline but no pagination contract or response bound. Adding an implicit limit could hide history; define explicit pagination if production history volume warrants it.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-the-history-timeline-on-a-request.md`
+  summary: Align the user-owned Postman history request description and body with its GET operation.
+  evidence: `postman/collections/emp-leave/get-leave-history.request.yaml` targets `GET /requests/9/history` but retains a generated POST-submission description and a JSON edit body; this unrelated request was preserved during Story 3.1.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-2-approve-a-request-with-an-optional-comment.md`
+  summary: Restrict the pending approval detail status schema to values this endpoint can return.
+  evidence: The in-progress Story 3.1 queue returns only PENDING requests, while ApprovalDetail currently documents APPROVED, REJECTED, and CANCELLED values as possible statuses.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-2-approve-a-request-with-an-optional-comment.md`
+  summary: Mark guaranteed comment response fields as required in the static OpenAPI schema.
+  evidence: The in-progress Story 3.1 approval detail includes comment id, request id, author id, body, and creation time, but the static Comment schema leaves them optional.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-2-approve-a-request-with-an-optional-comment.md`
+  summary: Document oldest-first ordering for approval detail history.
+  evidence: The in-progress Story 3.1 contract requires oldest-first history and the repository orders by creation time and id, but the static schema description does not state the ordering.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-2-approve-a-request-with-an-optional-comment.md`
+  summary: Avoid presenting incomplete legacy audit events as user-authored comment text.
+  evidence: The in-progress Story 3.1 comment assembly returns “Event details were not recorded.” for an audit event with no comment field, which can be mistaken for a real comment.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-2-approve-a-request-with-an-optional-comment.md`
+  summary: Correct pending approval history documentation that implies a pending request already has a decision event.
+  evidence: The in-progress Story 3.1 ApprovalDetail history description includes decisions even though the queue selects only PENDING requests.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-3-2-approve-a-request-with-an-optional-comment.md`
+  summary: Align the user-owned Postman history request description and body with its GET operation.
+  evidence: The in-progress Story 3.1 collection change updates the history route to GET but retains a generated POST-submission description and a JSON edit body.

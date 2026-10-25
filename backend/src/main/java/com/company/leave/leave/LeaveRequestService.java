@@ -21,6 +21,7 @@ import com.company.leave.users.UserService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -74,6 +75,18 @@ public class LeaveRequestService {
                 ? leaveRequestRepository.findByScope(scope)
                 : leaveRequestRepository.findByScope(scope, status, employeeId);
         return requests.stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    /**
+     * Returns pending requests assigned to the caller's approval scope. The repository applies
+     * the scope and approver filter together so the dashboard never exposes another approver's
+     * queue.
+     */
+    @Transactional(readOnly = true)
+    public List<LeaveRequestResponse> findPendingApprovalsByScope(UserScope scope, long currentUserId) {
+        return leaveRequestRepository.findPendingApprovalsByScope(scope, currentUserId).stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -201,6 +214,66 @@ public class LeaveRequestService {
         leaveRequestRepository.save(request);
         auditService.recordEvent(
                 "LEAVE_REQUEST", requestId, "LEAVE_REQUEST_CANCELLED", actorId, encodeDetails(detail));
+        return toResponse(request);
+    }
+
+    @Transactional
+    public LeaveRequestResponse applyDecision(
+            long requestId, LeaveRequestDecision decision, String comment, long approverId) {
+        LeaveRequest request = leaveRequestRepository.findByIdForUpdate(requestId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        ErrorCode.NOT_FOUND,
+                        "Leave request " + requestId + " does not exist."));
+        if (request.getApproverId() != approverId) {
+            throw new AccessDeniedException("Caller is not the assigned approver for request " + requestId);
+        }
+        if (request.getStatus() != RequestStatus.PENDING) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.INVALID_TRANSITION,
+                    "Request " + requestId + " is " + request.getStatus()
+                            + " and can no longer be approved.");
+        }
+        if (decision != LeaveRequestDecision.APPROVED) {
+            throw new IllegalArgumentException("Unsupported decision: " + decision);
+        }
+
+        Instant decidedAt = Instant.now();
+        request.approve(approverId, decidedAt, comment);
+        leaveRequestRepository.save(request);
+        balanceService.deductReservation(
+                request.getEmployeeId(),
+                request.getLeaveTypeId(),
+                request.getWorkingDays(),
+                approverId,
+                requestId);
+        auditService.recordEvent(
+                "LEAVE_REQUEST",
+                requestId,
+                "LEAVE_REQUEST_APPROVED",
+                approverId,
+                encodeDetails(comment == null ? "Approved request." : comment));
+
+        String leaveTypeName = leaveTypeService.findNameById(request.getLeaveTypeId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "Leave type " + request.getLeaveTypeId() + " does not exist."));
+        NotificationMessage notification = new NotificationMessage(
+                request.getEmployeeId(),
+                requestId,
+                NotificationKind.APPROVED,
+                leaveTypeName,
+                request.getStartDate(),
+                request.getEndDate(),
+                request.getWorkingDays(),
+                RequestStatus.APPROVED.name());
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                notificationService.sendNotification(notification);
+            }
+        });
+
         return toResponse(request);
     }
 

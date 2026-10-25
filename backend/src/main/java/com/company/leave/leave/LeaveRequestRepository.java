@@ -46,8 +46,27 @@ interface LeaveRequestRepository extends Repository<LeaveRequest, Long> {
             """)
     List<LeaveRequest> findAllByStatus(@Param("status") RequestStatus status);
 
+    @Query("""
+            select request from LeaveRequest request
+            where request.status = :status
+              and request.approverId = :approverId
+            order by request.submittedAt asc, request.id asc
+            """)
+    List<LeaveRequest> findPendingAssignedTo(
+            @Param("approverId") long approverId, @Param("status") RequestStatus status);
+
     default List<LeaveRequest> findByScope(UserScope scope) {
         return findByScope(scope, null, null);
+    }
+
+    default List<LeaveRequest> findPendingApprovalsByScope(UserScope scope, long currentUserId) {
+        if (scope instanceof UserScope.ManagerTeam managerTeam) {
+            return findPendingAssignedTo(managerTeam.managerId(), RequestStatus.PENDING);
+        }
+        if (scope instanceof UserScope.HrAll) {
+            return findPendingAssignedTo(currentUserId, RequestStatus.PENDING);
+        }
+        throw new IllegalArgumentException("Employee scope cannot read pending approvals: " + scope);
     }
 
     default List<LeaveRequest> findByScope(UserScope scope, RequestStatus status, Long employeeId) {

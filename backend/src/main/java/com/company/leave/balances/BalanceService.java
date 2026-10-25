@@ -148,6 +148,45 @@ public class BalanceService {
                 "Cancelled leave request " + requestId, actorId, requestId, Instant.now()));
     }
 
+    /**
+     * Converts a request's reservation into deducted entitlement and records the matching
+     * ledger entry. Must be called inside the request's transaction.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void deductReservation(long userId, long leaveTypeId, int workingDays,
+                                  long actorId, long requestId) {
+        if (workingDays <= 0) {
+            throw new IllegalArgumentException("workingDays must be positive");
+        }
+
+        LeaveBalanceId balanceId = new LeaveBalanceId(userId, leaveTypeId);
+        LeaveBalance balance = leaveBalanceRepository.findById(balanceId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.CONFLICT, ErrorCode.INSUFFICIENT_BALANCE,
+                        "No balance row exists for userId=" + userId + " leaveTypeId=" + leaveTypeId));
+
+        if (balance.getReservedDays() < workingDays || balance.getTotalDays() < workingDays) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.INSUFFICIENT_BALANCE,
+                    "Cannot deduct " + workingDays + " working days for request " + requestId
+                            + " from total=" + balance.getTotalDays()
+                            + ", reserved=" + balance.getReservedDays() + ".");
+        }
+
+        balance.deductReservedDays(workingDays);
+        leaveBalanceRepository.save(balance);
+        balanceLedgerRepository.save(new BalanceLedger(
+                userId,
+                leaveTypeId,
+                -workingDays,
+                LedgerKind.DEDUCT,
+                "Approved leave request " + requestId,
+                actorId,
+                requestId,
+                Instant.now()));
+    }
+
     private BalanceResponse toBalanceResponse(long userId, LeaveTypeResponse leaveType, LeaveBalance balance) {
         int totalDays = balance == null ? 0 : balance.getTotalDays();
         int reservedDays = balance == null ? 0 : balance.getReservedDays();

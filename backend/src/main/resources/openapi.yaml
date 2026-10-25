@@ -813,6 +813,10 @@ paths:
                       actorId: 6
                       occurredAt: "2026-10-20T11:00:00Z"
                       detail: Submitted Parental, 2026-11-16 to 2026-11-20 (5 working days)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /approvals/{requestId}/approve:
     parameters:
@@ -826,6 +830,7 @@ paths:
         its own request (self-approval, FR12, FR16).
       x-functional-requirements: [FR12, FR16, FR17, FR50, FR54]
       requestBody:
+        required: false
         content:
           application/json:
             schema:
@@ -852,6 +857,10 @@ paths:
                 submittedAt: "2026-10-22T09:15:00Z"
                 decidedAt: "2026-10-23T08:50:00Z"
                 decisionComment: Enjoy your trip!
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '403':
           description: Caller is not this request's assigned approver
           content:
@@ -865,6 +874,8 @@ paths:
                 detail: You are not the approver for request 101.
                 instance: /api/approvals/101/approve
                 code: ACCESS_DENIED
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           description: Request is no longer PENDING
           content:
@@ -2055,14 +2066,35 @@ components:
     ApprovalDetail:
       description: >
         A pending request plus everything FR11's "rich request context"
-        calls for — employee, dates, type, balance, recent history — and the
+        calls for — employee, dates, type, balance, complete history — and the
         comment thread (FR15), so the approver sees the full picture in one
         call instead of following up with GET /requests/{id}, .../history
         and .../comments separately.
       allOf:
         - $ref: '#/components/schemas/LeaveRequest'
         - type: object
+          required:
+            - id
+            - employeeId
+            - approverId
+            - leaveTypeId
+            - startDate
+            - endDate
+            - workingDays
+            - notes
+            - status
+            - submittedAt
+            - decidedAt
+            - decisionComment
+            - employeeUsername
+            - leaveTypeName
+            - balance
+            - comments
+            - history
           properties:
+            employeeUsername:
+              type: string
+              description: Username of the employee who submitted this request
             leaveTypeName:
               type: string
               description: From leave_types.name, e.g. Vacation, Sick, Parental, Sabbatical
@@ -2077,7 +2109,7 @@ components:
                 $ref: '#/components/schemas/Comment'
             history:
               type: array
-              description: Recent History timeline — submit, edits, comments — up to this pending decision (FR11, FR45)
+              description: Complete history timeline — submit, edits, comments, and decisions (FR11, FR45)
               items:
                 $ref: '#/components/schemas/HistoryEntry'
       example:
@@ -2105,11 +2137,13 @@ components:
           - id: 44
             requestId: 101
             authorId: 3
+            authorUsername: mgr.chen
             body: Can you cover the Tuesday handover before you leave?
             createdAt: "2026-10-22T13:40:00Z"
           - id: 45
             requestId: 101
             authorId: 5
+            authorUsername: emp.jsmith
             body: Yes, I'll hand off to Priya before I go.
             createdAt: "2026-10-22T14:05:00Z"
         history:
@@ -2132,7 +2166,7 @@ components:
 
     Comment:
       type: object
-      description: request_comments table (FR15)
+      description: A discussion comment associated with a leave request (FR15)
       properties:
         id:
           type: integer

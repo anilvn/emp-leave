@@ -1,0 +1,14 @@
+$kind: http-request
+description: "Generated from cURL: curl -X 'GET' \\\r
+
+  \  'http://localhost:8080/approvals/pending' \\\r
+
+  \  -H 'accept: application/json' \\\r
+
+  \  -H 'Cookie: access_token={{json_web_token_1667}}'"
+url: http://localhost:8080/approvals/pending
+method: GET
+headers:
+  accept: application/json
+  Cookie: access_token={{json_web_token_1667}}
+order: 15000

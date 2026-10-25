@@ -15,6 +15,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.yaml.snakeyaml.Yaml;
 
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -70,6 +71,51 @@ class OpenApiDocsIntegrationTest {
                 .andExpect(jsonPath("$.paths['/requests/{requestId}/cancel'].post.responses['403']").exists())
                 .andExpect(jsonPath("$.paths['/requests/{requestId}/cancel'].post.responses['404']").exists())
                 .andExpect(jsonPath("$.paths['/requests/{requestId}/cancel'].post.responses['409']").exists())
+                .andExpect(jsonPath("$.paths['/approvals/pending'].get.responses['200']").exists())
+                .andExpect(jsonPath("$.paths['/approvals/pending'].get.responses['403']").exists())
+                .andExpect(jsonPath("$.paths['/approvals/pending'].get.responses['200']"
+                        + ".content['application/json'].schema.items.$ref")
+                        .value("#/components/schemas/ApprovalDetail"))
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/approve'].post").exists())
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/approve'].post.responses['200']").exists())
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/approve'].post.responses['400']").exists())
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/approve'].post.responses['401']").exists())
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/approve'].post.responses['403']").exists())
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/approve'].post.responses['404']").exists())
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/approve'].post.responses['409']").exists())
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/approve'].post.requestBody.required")
+                        .doesNotExist())
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/approve'].post.requestBody.content"
+                        + "['application/json'].schema.$ref")
+                        .value("#/components/schemas/DecisionRequest"))
+                .andExpect(jsonPath("$.paths['/approvals/{requestId}/approve'].post.responses['200']"
+                        + ".content['application/json'].schema.$ref")
+                        .value("#/components/schemas/LeaveRequest"))
+                .andExpect(jsonPath("$.components.schemas.DecisionRequest.properties.comment").exists())
+                .andExpect(jsonPath("$.components.schemas.DecisionRequest.required").doesNotExist())
+                .andExpect(jsonPath("$.components.schemas.ApprovalDetail.properties.employeeUsername.type")
+                        .value("string"))
+                .andExpect(jsonPath("$.components.schemas.ApprovalDetail.properties.status.enum[0]")
+                        .value("PENDING"))
+                .andExpect(jsonPath("$.components.schemas.ApprovalDetail.properties.status.enum[1]")
+                        .value("APPROVED"))
+                .andExpect(jsonPath("$.components.schemas.ApprovalDetail.properties.status.enum[2]")
+                        .value("REJECTED"))
+                .andExpect(jsonPath("$.components.schemas.ApprovalDetail.properties.status.enum[3]")
+                        .value("CANCELLED"))
+                .andExpect(jsonPath("$.components.schemas.ApprovalDetail.required")
+                        .value(containsInAnyOrder(
+                                "id", "employeeId", "approverId", "leaveTypeId", "startDate", "endDate",
+                                "workingDays", "notes", "status", "submittedAt", "decidedAt", "decisionComment",
+                                "employeeUsername", "leaveTypeName", "balance", "comments", "history")))
+                .andExpect(jsonPath("$.components.schemas.ApprovalDetail.properties.balance.$ref")
+                        .value("#/components/schemas/Balance"))
+                .andExpect(jsonPath("$.components.schemas.ApprovalDetail.properties.comments.items.$ref")
+                        .value("#/components/schemas/Comment"))
+                .andExpect(jsonPath("$.components.schemas.ApprovalDetail.properties.history.items.$ref")
+                        .value("#/components/schemas/HistoryEntry"))
+                .andExpect(jsonPath("$.components.schemas.Balance.properties.availableDays.type")
+                        .value("integer"))
                 .andExpect(jsonPath("$.paths['/users/{userId}/reset-password'].post").exists());
     }
 
@@ -172,6 +218,66 @@ class OpenApiDocsIntegrationTest {
                     .toList();
             assertThat(enumValues)
                     .containsExactly("SUBMITTED", "EDITED", "CANCELLED", "APPROVED", "REJECTED", "COMMENT");
+        }
+    }
+
+    @Test
+    void pendingApprovalsContractCarriesEveryRequestAndDecisionContextField() throws Exception {
+        try (InputStream input = getClass().getResourceAsStream("/openapi.yaml")) {
+            assertThat(input).isNotNull();
+            Map<?, ?> document = new Yaml().load(input);
+            Map<?, ?> paths = (Map<?, ?>) document.get("paths");
+            Map<?, ?> operation = mapAt(mapAt(paths, "/approvals/pending"), "get");
+            Map<?, ?> responses = mapAt(operation, "responses");
+            assertThat(responses.keySet().stream().map(Object::toString).toList())
+                    .contains("200", "401", "403");
+            assertThat(schemaRef(mapAt(responses, "200"), "content", "application/json", "schema", "items"))
+                    .isEqualTo("#/components/schemas/ApprovalDetail");
+
+            Map<?, ?> components = (Map<?, ?>) document.get("components");
+            Map<?, ?> schemas = mapAt(components, "schemas");
+            Map<?, ?> approvalDetail = mapAt(schemas, "ApprovalDetail");
+            Map<?, ?> detailSchema = (Map<?, ?>) ((List<?>) approvalDetail.get("allOf")).get(1);
+            Map<?, ?> detailProperties = mapAt(detailSchema, "properties");
+            assertThat(detailProperties.keySet().stream().map(Object::toString).toList())
+                    .contains("employeeUsername", "leaveTypeName", "balance", "comments", "history");
+            assertThat(((List<?>) detailSchema.get("required")).stream().map(Object::toString).toList())
+                    .containsExactlyInAnyOrder(
+                            "id", "employeeId", "approverId", "leaveTypeId", "startDate", "endDate",
+                            "workingDays", "notes", "status", "submittedAt", "decidedAt", "decisionComment",
+                            "employeeUsername", "leaveTypeName", "balance", "comments", "history");
+
+            Map<?, ?> leaveRequest = mapAt(schemas, "LeaveRequest");
+            Map<?, ?> requestProperties = mapAt(leaveRequest, "properties");
+            assertThat(requestProperties.keySet().stream().map(Object::toString).toList())
+                    .contains("id", "employeeId", "approverId", "leaveTypeId", "startDate", "endDate",
+                            "workingDays", "notes", "status", "submittedAt", "decidedAt", "decisionComment");
+        }
+    }
+
+    @Test
+    void handWrittenContractDocumentsOptionalApprovalCommentAndResponses() throws Exception {
+        try (InputStream input = getClass().getResourceAsStream("/openapi.yaml")) {
+            assertThat(input).isNotNull();
+            Map<?, ?> document = new Yaml().load(input);
+            Map<?, ?> paths = (Map<?, ?>) document.get("paths");
+            Map<?, ?> operation = mapAt(mapAt(paths, "/approvals/{requestId}/approve"), "post");
+            Map<?, ?> requestBody = mapAt(operation, "requestBody");
+            Map<?, ?> responses = mapAt(operation, "responses");
+
+            assertThat(requestBody.get("required")).isEqualTo(false);
+            assertThat(schemaRef(requestBody, "content", "application/json", "schema"))
+                    .isEqualTo("#/components/schemas/DecisionRequest");
+            assertThat(responses.keySet().stream().map(Object::toString).toList())
+                    .contains("200", "400", "401", "403", "404", "409");
+            assertThat(schemaRef(mapAt(responses, "200"), "content", "application/json", "schema"))
+                    .isEqualTo("#/components/schemas/LeaveRequest");
+
+            Map<?, ?> schemas = mapAt(mapAt(document, "components"), "schemas");
+            Map<?, ?> decisionRequest = mapAt(schemas, "DecisionRequest");
+            Map<?, ?> properties = mapAt(decisionRequest, "properties");
+            assertThat(properties.keySet().stream().map(Object::toString).toList()).containsExactly("comment");
+            assertThat(decisionRequest.get("required")).isNull();
         }
     }
 

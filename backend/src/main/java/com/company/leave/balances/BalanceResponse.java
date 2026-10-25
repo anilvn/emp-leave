@@ -4,7 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Value;
 
-@Schema(description = "One leave balance for a user and leave type")
+@Schema(name = "Balance", description = "One leave balance for a user and leave type")
 @Value
 @Builder
 public class BalanceResponse {

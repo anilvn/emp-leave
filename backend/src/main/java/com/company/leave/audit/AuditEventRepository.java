@@ -28,11 +28,21 @@ interface AuditEventRepository extends Repository<AuditEvent, Long> {
                         'LEAVE_REQUEST_APPROVED',
                         'LEAVE_REQUEST_REJECTED'
                     ))
-                or (entity = 'REQUEST_COMMENT'
-                    and action = 'REQUEST_COMMENT_ADDED'
-                    and details_json ->> 'requestId' = cast(:requestId as text))
+                    or (entity = 'REQUEST_COMMENT'
+                        and action = 'REQUEST_COMMENT_ADDED'
+                        and details_json ->> 'requestId' = cast(:requestId as text))
             )
             order by created_at asc, id asc
             """, nativeQuery = true)
     List<AuditEvent> findRequestHistoryEvents(@Param("requestId") long requestId);
+
+    @Query(value = """
+            select *
+            from audit_events
+            where entity = 'REQUEST_COMMENT'
+              and action = 'REQUEST_COMMENT_ADDED'
+              and details_json ->> 'requestId' = cast(:requestId as text)
+            order by created_at asc, id asc
+            """, nativeQuery = true)
+    List<AuditEvent> findRequestCommentEvents(@Param("requestId") long requestId);
 }

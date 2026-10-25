@@ -43,4 +43,12 @@ class LeaveBalance {
         }
         this.reservedDays = updatedReservedDays;
     }
+
+    void deductReservedDays(int days) {
+        if (days <= 0 || days > reservedDays || days > totalDays) {
+            throw new IllegalArgumentException("deduction must not exceed reserved or total days");
+        }
+        this.reservedDays -= days;
+        this.totalDays -= days;
+    }
 }

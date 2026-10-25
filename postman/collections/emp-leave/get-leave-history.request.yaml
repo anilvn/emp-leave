@@ -20,8 +20,8 @@ description: "Generated from cURL: curl -X 'POST' \\\r
   \  \"notes\": \"Family trip\"\r
 
   }'"
-url: http://localhost:8080/requests/9
-method: PUT
+url: http://localhost:8080/requests/9/history
+method: GET
 headers:
   accept: "*/*"
   Content-Type: application/json

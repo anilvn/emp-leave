@@ -3,10 +3,12 @@ name: 7b. GET /users as EMPLOYEE - expect 403
 method: GET
 url: "{{BASE}}/users"
 examples: .resources/14 7b. GET users as EMPLOYEE - expect 403.resources/examples
-order: 14000
+order: 16544
 headers:
-  Cookie: access_token={{json_web_token_0q7s}}; Path=/; Max-Age=900; Expires=Fri, 23 Oct 2026 05:26:21 GMT; Secure; HttpOnly; SameSite=Strict
+  Cookie: access_token={{json_web_token_0q7s}}; Path=/; Max-Age=900; Expires=Fri,
+    23 Oct 2026 05:26:21 GMT; Secure; HttpOnly; SameSite=Strict
 scripts:
   - type: afterResponse
-    code: pm.test("Employee list access is denied", () => pm.response.to.have.status(403));
+    code: pm.test("Employee list access is denied", () =>
+      pm.response.to.have.status(403));
     language: text/javascript

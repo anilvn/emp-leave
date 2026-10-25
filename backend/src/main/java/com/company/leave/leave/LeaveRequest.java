@@ -91,4 +91,16 @@ class LeaveRequest {
         }
         this.status = RequestStatus.CANCELLED;
     }
+
+    void approve(long approverId, Instant decidedAt, String decisionComment) {
+        if (status != RequestStatus.PENDING) {
+            throw new IllegalStateException("Only pending requests can be approved");
+        }
+        if (this.approverId != approverId) {
+            throw new IllegalArgumentException("Only the assigned approver can approve this request");
+        }
+        this.status = RequestStatus.APPROVED;
+        this.decidedAt = decidedAt;
+        this.decisionComment = decisionComment;
+    }
 }
