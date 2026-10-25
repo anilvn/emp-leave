@@ -17,6 +17,7 @@ import com.company.leave.notifications.NotificationMessage;
 import com.company.leave.notifications.NotificationService;
 import com.company.leave.security.AccessPolicy;
 import com.company.leave.security.UserScope;
+import com.company.leave.users.Role;
 import com.company.leave.users.UserService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -64,6 +65,37 @@ public class LeaveRequestService {
         this.auditService = auditService;
         this.notificationService = notificationService;
         this.accessPolicy = accessPolicy;
+    }
+
+    @Transactional(readOnly = true)
+    public List<AuditRequestReport> getAuditReport() {
+        accessPolicy.requireRole(Role.HR_ADMIN);
+        List<LeaveRequest> requests = leaveRequestRepository.findAllByStatus(null);
+        if (requests.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, String> employeeUsernames = userService.getUsernamesByIds(
+                requests.stream().map(LeaveRequest::getEmployeeId).distinct().toList());
+        return requests.stream()
+                .map(req -> {
+                    String leaveTypeName = leaveTypeService.findNameById(req.getLeaveTypeId())
+                            .orElseThrow(() -> new IllegalStateException(
+                                    "Leave type " + req.getLeaveTypeId() + " does not exist."));
+                    return AuditRequestReport.builder()
+                            .requestId(req.getId())
+                            .employeeId(req.getEmployeeId())
+                            .employeeUsername(employeeUsernames.get(req.getEmployeeId()))
+                            .leaveTypeId(req.getLeaveTypeId())
+                            .leaveTypeName(leaveTypeName)
+                            .startDate(req.getStartDate())
+                            .endDate(req.getEndDate())
+                            .workingDays(req.getWorkingDays())
+                            .status(req.getStatus().name())
+                            .comments(assembleComments(req.getId()))
+                            .history(assembleHistory(req.getId()))
+                            .build();
+                })
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -454,6 +486,38 @@ public class LeaveRequestService {
         });
 
         return toResponse(leaveRequest);
+    }
+
+    private List<Comment> assembleComments(long requestId) {
+        List<RequestComment> rows =
+                requestCommentRepository.findByRequestIdOrderByCreatedAtAscIdAsc(requestId);
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, String> usernames = userService.getUsernamesByIds(
+                rows.stream().map(RequestComment::getAuthorId).distinct().toList());
+        return rows.stream()
+                .map(c -> Comment.builder()
+                        .id(c.getId())
+                        .requestId(c.getRequestId())
+                        .authorId(c.getAuthorId())
+                        .authorUsername(usernames.get(c.getAuthorId()))
+                        .body(c.getBody())
+                        .createdAt(c.getCreatedAt())
+                        .build())
+                .toList();
+    }
+
+    private List<HistoryEntry> assembleHistory(long requestId) {
+        List<AuditService.RequestHistoryEvent> events = auditService.findLeaveRequestEvents(requestId);
+        if (events.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, String> usernames = userService.getUsernamesByIds(
+                events.stream().map(AuditService.RequestHistoryEvent::actorId).distinct().toList());
+        return events.stream()
+                .map(event -> toHistoryEntry(event, usernames.get(event.actorId())))
+                .toList();
     }
 
     private HistoryEntry toHistoryEntry(AuditService.RequestHistoryEvent event, String actorUsername) {
