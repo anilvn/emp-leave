@@ -39,3 +39,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-4-see-my-requests-and-their-status.md`
   summary: Correct the Postman request named `my-leave-req-by-id` so it targets leave-request detail rather than the balance endpoint.
   evidence: The uncommitted request is named as request detail but targets `/balances/me` and also supplies a raw token as its cookie value; it was left untouched as user-owned Postman work.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-edit-a-pending-request.md`
+  summary: Align hand-written OpenAPI 401 response documentation across protected operations.
+  evidence: The PUT operation omits an explicit 401 response even though callers must satisfy the global cookie-auth requirement; this omission predates the story implementation and should be resolved consistently across the API contract.

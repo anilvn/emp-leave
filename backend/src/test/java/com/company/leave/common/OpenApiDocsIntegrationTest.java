@@ -1,5 +1,8 @@
 package com.company.leave.common;
 
+import java.io.InputStream;
+import java.util.Map;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -9,7 +12,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.yaml.snakeyaml.Yaml;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -67,7 +72,60 @@ class OpenApiDocsIntegrationTest {
     }
 
     @Test
+    void handWrittenContractDocumentsPendingRequestUpdateOperation() throws Exception {
+        try (InputStream input = getClass().getResourceAsStream("/openapi.yaml")) {
+            assertThat(input).isNotNull();
+            Map<?, ?> document = new Yaml().load(input);
+            Map<?, ?> paths = (Map<?, ?>) document.get("paths");
+            Map<?, ?> requestPath = (Map<?, ?>) paths.get("/requests/{requestId}");
+            Map<?, ?> updateOperation = (Map<?, ?>) requestPath.get("put");
+            Map<?, ?> responses = (Map<?, ?>) updateOperation.get("responses");
+
+            assertThat(responses.keySet().stream().map(Object::toString).toList())
+                    .contains("200", "400", "403", "404", "409");
+            assertThat(schemaRef(mapAt(updateOperation, "requestBody"), "content", "application/json", "schema"))
+                    .isEqualTo("#/components/schemas/LeaveRequestUpdate");
+            assertThat(schemaRef(mapAt(responses, "200"), "content", "application/json", "schema"))
+                    .isEqualTo("#/components/schemas/LeaveRequest");
+            assertThat(problemCode(mapAt(responses, "400"), "content", "application/problem+json",
+                    "examples", "validationFailed", "value"))
+                    .isEqualTo("VALIDATION_FAILED");
+            assertThat(problemCode(mapAt(responses, "400"), "content", "application/problem+json",
+                    "examples", "leaveTypeChangeNotAllowed", "value"))
+                    .isEqualTo("LEAVE_TYPE_CHANGE_NOT_ALLOWED");
+            assertThat(problemCode(mapAt(responses, "403"), "content", "application/problem+json", "example"))
+                    .isEqualTo("ACCESS_DENIED");
+            assertThat(problemCode(mapAt(responses, "409"), "content", "application/problem+json",
+                    "examples", "invalidTransition", "value"))
+                    .isEqualTo("INVALID_TRANSITION");
+            assertThat(problemCode(mapAt(responses, "409"), "content", "application/problem+json",
+                    "examples", "insufficientBalance", "value"))
+                    .isEqualTo("INSUFFICIENT_BALANCE");
+        }
+    }
+
+    @Test
     void swaggerUiIsReachableUnauthenticated() throws Exception {
         mockMvc.perform(get("/swagger-ui/index.html")).andExpect(status().isOk());
+    }
+
+    private String schemaRef(Map<?, ?> operationPart, String... path) {
+        Map<?, ?> current = operationPart;
+        for (String key : path) {
+            current = (Map<?, ?>) current.get(key);
+        }
+        return (String) current.get("$ref");
+    }
+
+    private String problemCode(Map<?, ?> responsePart, String... path) {
+        Map<?, ?> current = responsePart;
+        for (String key : path) {
+            current = (Map<?, ?>) current.get(key);
+        }
+        return (String) current.get("code");
+    }
+
+    private Map<?, ?> mapAt(Map<?, ?> parent, String key) {
+        return (Map<?, ?>) parent.get(key);
     }
 }

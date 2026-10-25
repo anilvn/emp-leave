@@ -887,6 +887,38 @@ class LeaveRequestControllerIntegrationTest {
     }
 
     @Test
+    void missingRequiredEditFieldReturnsValidationErrorWithoutChangingRequest() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");
+
+        mockMvc.perform(put("/requests/{requestId}", requestId)
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "leaveTypeId": %d,
+                                    "endDate": "2026-11-03",
+                                    "notes": "Missing start date"
+                                }
+                                """.formatted(vacationTypeId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "select start_date::text || ':' || end_date::text || ':' || working_days || ':' || notes "
+                        + "from leave_requests where id = ?",
+                String.class, requestId)).isEqualTo("2026-10-29:2026-11-03:4:Original");
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(4);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from balance_ledger where request_id = ?", Integer.class, requestId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from audit_events where entity_id = ? and action = 'LEAVE_REQUEST_EDITED'",
+                Integer.class, requestId)).isZero();
+    }
+
+    @Test
     void unrepresentableEditRangeReturnsValidationErrorWithoutChangingReservation() throws Exception {
         long vacationTypeId = leaveTypeId("Vacation");
         long requestId = createPendingRequest(vacationTypeId, "2026-10-29", "2026-11-03", "Original");

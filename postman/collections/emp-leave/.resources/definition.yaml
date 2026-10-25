@@ -27,3 +27,6 @@ variables:
   - key: json_web_token_08hr
     secret: true
     disabled: false
+  - key: json_web_token_17f8
+    secret: true
+    disabled: false

@@ -1,7 +1,7 @@
 # Story 2.5 — Edit a Pending Request
 
-Runnable examples for editing a pending leave request. Start the API locally
-or run the HTTPS proxy:
+Runnable examples for editing a pending leave request. Start the HTTPS proxy
+with Docker Compose:
 
 ```bash
 cp .env.example .env
@@ -19,6 +19,7 @@ TOKEN=$(curl -sk -X POST "$BASE/auth/login" \
   -D - -o /dev/null \
   -d '{"username":"emp.jsmith","password":"Passw0rd1"}' \
   | sed -n 's/^Set-Cookie: access_token=\([^;]*\).*/\1/ip' | tr -d '\r')
+test -n "$TOKEN" || { echo "Login did not return an access token"; exit 1; }
 
 create_pending() {
   curl -skS -f -X POST "$BASE/requests" \
@@ -108,6 +109,7 @@ OTHER_TOKEN=$(curl -sk -X POST "$BASE/auth/login" \
   -D - -o /dev/null \
   -d '{"username":"emp.alee","password":"Passw0rd1"}' \
   | sed -n 's/^Set-Cookie: access_token=\([^;]*\).*/\1/ip' | tr -d '\r')
+test -n "$OTHER_TOKEN" || { echo "Other employee login did not return an access token"; exit 1; }
 curl -ki -X PUT "$BASE/requests/$REQUEST_ID" \
   -H 'Content-Type: application/json' \
   -H "Cookie: access_token=$OTHER_TOKEN" \

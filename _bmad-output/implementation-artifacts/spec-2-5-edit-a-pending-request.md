@@ -2,7 +2,7 @@
 title: 'Story 2.5: Edit a Pending Request'
 type: 'feature'
 created: '2026-10-23'
-status: 'done'
+status: 'in-review'
 route: 'dispatch'
 review_loop_iteration: 0
 baseline_commit: '6e9ec4e9d314f7f53365a26c4a7aab5fe403a8ee'
@@ -84,7 +84,7 @@ Reservation validation must treat the request's current held days as available t
 - `backend\mvnw.cmd -f backend\pom.xml -Dtest=WorkingDayCalculatorTest test` — date-boundary and overflow behavior.
 - `python -c "import yaml; yaml.safe_load(open(r'backend\src\main\resources\openapi.yaml', encoding='utf-8'))"` — OpenAPI YAML parses.
 
-**Results:** The request integration suite ran 35 tests, the OpenAPI suite ran 3 tests, and the weekday calculator suite ran 2 tests; all passed with no failures or skips. The OpenAPI YAML parsed successfully, and `git diff --check` passed. The curl examples were not run against the Docker stack because Compose requires a configured `JWT_SECRET`; the guide now documents the local `.env` setup.
+**Results:** The request integration suite ran 36 tests, the OpenAPI suite ran 4 tests, and the weekday calculator suite ran 2 tests; all 42 passed with no failures or skips. The OpenAPI YAML parsed successfully, and `git diff --check` passed. The curl examples were not run against the Docker stack because Compose requires a configured `JWT_SECRET`; the guide documents the required local `.env` setup.
 
 ## Review Triage Log
 
@@ -101,3 +101,14 @@ Reservation validation must treat the request's current held days as available t
 | A short range ending at `LocalDate.MAX` overflows after counting the final date. | medium | A focused test reproduced `DateTimeException`; weekday counting now uses bounded arithmetic and passes the boundary test; patch applied. |
 | Very large ranges could monopolize a request thread, and counts beyond `int` were not representable. | medium | The prior implementation iterated day by day. Replaced it with constant-time arithmetic and maps unrepresentable counts to `VALIDATION_FAILED`; unit and integration tests pass; patch applied. |
 | PUT unknown-ID response lacked a test. | low | Independent verification confirmed the gap; the new integration test asserts 404 `NOT_FOUND` and unchanged balance, ledger, and audit state; patch applied. |
+| The PUT contract does not explicitly list 401. | low | The 401 omission predates this implementation in the hand-written contract, while global `cookieAuth` security already marks protected operations; defer to a project-wide OpenAPI auth-response consistency task. |
+| Omitting optional `notes` clears the saved notes. | false | This is a PUT replacement of the editable payload fields; the spec permits optional notes but does not require preserving omitted prior content. |
+| The PUT operation is tagged with FR9. | false | The tag predates this implementation, and the operation preserves submission metadata; no mismatched runtime behavior was established by the finding. |
+| The 400 examples do not show every invalid-date variant. | false | The contract has a general `VALIDATION_FAILED` example, and the matrix requires response behavior rather than a separate example for every validation cause. |
+| The Code Map names `findById` while the update path uses `findByIdForUpdate`. | false | The new repository lookup adds the row lock required to prevent concurrent reservation deltas; the requested spec-only wording change is not an implementation defect. |
+| The existing review log repeats two findings and uses an unclear cross-reference. | false | The overlapping entries record separate review observations and do not affect code behavior; a spec-only cleanup is rejected by the review rules. |
+| The access-denied curl example does not check the second login token. | low | Added an explicit non-empty-token guard so a failed login cannot be mistaken for a 403 authorization result; patch applied. |
+| The success test does not assert audit actor and timestamp fields. | false | The update passes the authenticated actor id to `AuditService.recordEvent`, which persists it with `Instant.now()`; the acceptance criterion requires one matching audit event, which the test asserts. |
+| The curl guide offers a local-start option but only documents Docker Compose. | low | Narrowed the introduction to the Docker HTTPS setup actually shown; patch applied. |
+| Required-field validation had no missing-field integration assertion. | low | Added a missing-`startDate` request test asserting 400 and unchanged request, reservation, ledger, and edit-audit state; patch applied. |
+| The hand-written OpenAPI file was syntax-checked but not semantically asserted. | low | Added an integration assertion for the static PUT schema references, response set, and documented problem codes; patch applied. |
