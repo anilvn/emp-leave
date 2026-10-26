@@ -1,0 +1,898 @@
+{
+  "info": {
+    "_postman_id": "6d143c0a-30f3-4f4e-b270-1133d2b23171",
+    "name": "Company Leave API - Persona Flows",
+    "description": "Ordered, stateful walkthrough using seeded HR, manager, and employee accounts. Run requests from 01 onward with the Company Leave - Local environment selected. It creates three leave requests (one approved, one rejected, one cancelled) and changes the approved employee's balance. Intended for a disposable/local database, not production. The environment defaults to the direct backend URL; for Docker Compose use https://localhost/api and disable SSL verification for the self-signed local certificate.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "01. Log in as HR",
+      "description": "Start with the HR persona. The test script saves the access_token cookie and HR user ID to environment variables for later HR-only balance, ledger, and audit requests.",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{hrUsername}}\",\n  \"password\": \"{{seedPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/auth/login"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.environment.unset(\"hrAccessToken\");",
+              "pm.environment.unset(\"hrUserId\");"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HR login succeeds\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code !== 200) {",
+              "  pm.execution.setNextRequest(null);",
+              "} else {",
+              "  const user = pm.response.json();",
+              "  pm.test(\"Logged-in account is HR\", () => pm.expect(user.role).to.eql(\"HR_ADMIN\"));",
+              "  if (user.role !== \"HR_ADMIN\") {",
+              "    pm.execution.setNextRequest(null);",
+              "  } else {",
+              "    pm.environment.set(\"hrUserId\", String(user.id));",
+              "    const cookie = pm.response.headers.get(\"Set-Cookie\") || \"\";",
+              "    const match = cookie.match(/(?:^|[,;]\\s*)access_token=([^;]+)/i);",
+              "    pm.test(\"HR access_token cookie is returned\", () => pm.expect(match).to.not.equal(null));",
+              "    if (match) pm.environment.set(\"hrAccessToken\", match[1]);",
+              "    else pm.execution.setNextRequest(null);",
+              "  }",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02. Log in as manager Chen",
+      "description": "Create a separate manager session. This seeded manager approves and rejects the pending requests submitted by employees reporting to Chen.",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{managerUsername}}\",\n  \"password\": \"{{seedPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/auth/login"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.environment.unset(\"managerAccessToken\");",
+              "pm.environment.unset(\"managerUserId\");"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Manager login succeeds\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code !== 200) {",
+              "  pm.execution.setNextRequest(null);",
+              "} else {",
+              "  const user = pm.response.json();",
+              "  pm.test(\"Logged-in account is a manager\", () => pm.expect(user.role).to.eql(\"MANAGER\"));",
+              "  if (user.role !== \"MANAGER\") {",
+              "    pm.execution.setNextRequest(null);",
+              "  } else {",
+              "    pm.environment.set(\"managerUserId\", String(user.id));",
+              "    const cookie = pm.response.headers.get(\"Set-Cookie\") || \"\";",
+              "    const match = cookie.match(/(?:^|[,;]\\s*)access_token=([^;]+)/i);",
+              "    pm.test(\"Manager access_token cookie is returned\", () => pm.expect(match).to.not.equal(null));",
+              "    if (match) pm.environment.set(\"managerAccessToken\", match[1]);",
+              "    else pm.execution.setNextRequest(null);",
+              "  }",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03. Log in as employee JSmith",
+      "description": "Start the approval journey as an employee. The response script stores this employee's cookie and ID for request submission and the HR ledger lookup.",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{approveEmployeeUsername}}\",\n  \"password\": \"{{seedPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/auth/login"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.environment.unset(\"approveEmployeeAccessToken\");",
+              "pm.environment.unset(\"approveEmployeeId\");"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Employee login succeeds\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code !== 200) {",
+              "  pm.execution.setNextRequest(null);",
+              "} else {",
+              "  const user = pm.response.json();",
+              "  pm.test(\"Logged-in account is an employee\", () => pm.expect(user.role).to.eql(\"EMPLOYEE\"));",
+              "  if (user.role !== \"EMPLOYEE\") {",
+              "    pm.execution.setNextRequest(null);",
+              "  } else {",
+              "    pm.environment.set(\"approveEmployeeId\", String(user.id));",
+              "    const cookie = pm.response.headers.get(\"Set-Cookie\") || \"\";",
+              "    const match = cookie.match(/(?:^|[,;]\\s*)access_token=([^;]+)/i);",
+              "    pm.test(\"Employee access_token cookie is returned\", () => pm.expect(match).to.not.equal(null));",
+              "    if (match) pm.environment.set(\"approveEmployeeAccessToken\", match[1]);",
+              "    else pm.execution.setNextRequest(null);",
+              "  }",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04. JSmith views personal balances",
+      "description": "Verify that an employee can view their own balances before creating a request. The same seeded Vacation balance will be reflected in the HR ledger later.",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Cookie",
+            "value": "access_token={{approveEmployeeAccessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/balances/me"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Personal balances are available\", () => pm.response.to.have.status(200));",
+              "const balances = pm.response.json();",
+              "const vacation = balances.find(balance => Number(balance.leaveTypeId) === Number(pm.environment.get(\"vacationLeaveTypeId\")));",
+              "pm.test(\"Seeded Vacation balance is available\", () => pm.expect(vacation).to.exist);",
+              "pm.expect(vacation.totalDays).to.eql(20);",
+              "pm.expect(vacation.reservedDays).to.eql(0);",
+              "pm.expect(vacation.availableDays).to.eql(20);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05. JSmith submits a request for approval",
+      "description": "Create a one-weekday Vacation request. The pre-request script chooses the next weekday dynamically; the response script saves the generated request ID for manager approval and history lookups.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.environment.unset(\"approvedRequestId\");",
+              "const date = new Date();",
+              "date.setUTCDate(date.getUTCDate() + 7);",
+              "while (date.getUTCDay() === 0 || date.getUTCDay() === 6) date.setUTCDate(date.getUTCDate() + 1);",
+              "pm.environment.set(\"leaveStartDate\", date.toISOString().slice(0, 10));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Leave request is created\", () => pm.response.to.have.status(201));",
+              "const request = pm.response.json();",
+              "pm.expect(request.status).to.eql(\"PENDING\");",
+              "pm.environment.set(\"approvedRequestId\", String(request.id));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "access_token={{approveEmployeeAccessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"leaveTypeId\": {{vacationLeaveTypeId}},\n  \"startDate\": \"{{leaveStartDate}}\",\n  \"endDate\": \"{{leaveStartDate}}\",\n  \"notes\": \"Postman approval flow\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/requests"
+      }
+    },
+    {
+      "name": "06. JSmith checks request and assigned approver",
+      "description": "Confirm the created request belongs to JSmith and is assigned to manager Chen before the manager acts on it.",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Cookie",
+            "value": "access_token={{approveEmployeeAccessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/requests/{{approvedRequestId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Employee can read their request\", () => pm.response.to.have.status(200));",
+              "const request = pm.response.json();",
+              "pm.expect(String(request.id)).to.eql(pm.environment.get(\"approvedRequestId\"));",
+              "pm.expect(String(request.employeeId)).to.eql(pm.environment.get(\"approveEmployeeId\"));",
+              "pm.environment.set(\"requestApproverId\", String(request.approverId));",
+              "pm.test(\"Manager Chen is the assigned approver\", () => pm.expect(String(request.approverId)).to.eql(pm.environment.get(\"managerUserId\")));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07. Log in as employee ALee",
+      "description": "Switch to a second employee persona for the cancellation flow. A separate environment token keeps JSmith's approval session available.",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{cancelEmployeeUsername}}\",\n  \"password\": \"{{seedPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/auth/login"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.environment.unset(\"cancelEmployeeAccessToken\");",
+              "pm.environment.unset(\"cancelEmployeeId\");"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"ALee login succeeds\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code !== 200) {",
+              "  pm.execution.setNextRequest(null);",
+              "} else {",
+              "  const user = pm.response.json();",
+              "  pm.test(\"Logged-in account is an employee\", () => pm.expect(user.role).to.eql(\"EMPLOYEE\"));",
+              "  if (user.role !== \"EMPLOYEE\") {",
+              "    pm.execution.setNextRequest(null);",
+              "  } else {",
+              "    pm.environment.set(\"cancelEmployeeId\", String(user.id));",
+              "    const cookie = pm.response.headers.get(\"Set-Cookie\") || \"\";",
+              "    const match = cookie.match(/(?:^|[,;]\\s*)access_token=([^;]+)/i);",
+              "    pm.test(\"ALee access_token cookie is returned\", () => pm.expect(match).to.not.equal(null));",
+              "    if (match) pm.environment.set(\"cancelEmployeeAccessToken\", match[1]);",
+              "    else pm.execution.setNextRequest(null);",
+              "  }",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08. ALee submits a request to cancel",
+      "description": "Create a separate pending request for the cancellation journey, saving its request ID independently from the approval and rejection flows.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.environment.unset(\"cancelRequestId\");",
+              "const date = new Date();",
+              "date.setUTCDate(date.getUTCDate() + 7);",
+              "while (date.getUTCDay() === 0 || date.getUTCDay() === 6) date.setUTCDate(date.getUTCDate() + 1);",
+              "pm.environment.set(\"leaveStartDate\", date.toISOString().slice(0, 10));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Cancellation-flow request is created\", () => pm.response.to.have.status(201));",
+              "const request = pm.response.json();",
+              "pm.expect(request.status).to.eql(\"PENDING\");",
+              "pm.environment.set(\"cancelRequestId\", String(request.id));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "access_token={{cancelEmployeeAccessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"leaveTypeId\": {{vacationLeaveTypeId}},\n  \"startDate\": \"{{leaveStartDate}}\",\n  \"endDate\": \"{{leaveStartDate}}\",\n  \"notes\": \"Postman cancellation flow\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/requests"
+      }
+    },
+    {
+      "name": "09. ALee cancels the pending request",
+      "description": "Cancel while the request is still pending. The API should release its reservation; the next request confirms the terminal status.",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Cookie",
+            "value": "access_token={{cancelEmployeeAccessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/requests/{{cancelRequestId}}/cancel"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Pending request is cancelled\", () => pm.response.to.have.status(200));",
+              "pm.expect(pm.response.json().status).to.eql(\"CANCELLED\");"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. ALee verifies the reservation was released",
+      "description": "Check ALee's balances after cancellation. The canceled request response already confirmed CANCELLED; this verifies the reserved Vacation day was returned.",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Cookie",
+            "value": "access_token={{cancelEmployeeAccessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/balances/me"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"ALee balances are available after cancellation\", () => pm.response.to.have.status(200));",
+              "const balances = pm.response.json();",
+              "const vacation = balances.find(balance => Number(balance.leaveTypeId) === Number(pm.environment.get(\"vacationLeaveTypeId\")));",
+              "pm.test(\"Vacation balance is present\", () => pm.expect(vacation).to.exist);",
+              "pm.expect(vacation.reservedDays).to.eql(0);",
+              "pm.expect(vacation.availableDays).to.eql(20);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. Log in as employee CWong",
+      "description": "Switch to a third employee for the rejection journey while retaining the other persona tokens in the environment.",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{rejectEmployeeUsername}}\",\n  \"password\": \"{{seedPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/auth/login"
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.environment.unset(\"rejectEmployeeAccessToken\");",
+              "pm.environment.unset(\"rejectEmployeeId\");"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"CWong login succeeds\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code !== 200) {",
+              "  pm.execution.setNextRequest(null);",
+              "} else {",
+              "  const user = pm.response.json();",
+              "  pm.test(\"Logged-in account is an employee\", () => pm.expect(user.role).to.eql(\"EMPLOYEE\"));",
+              "  if (user.role !== \"EMPLOYEE\") {",
+              "    pm.execution.setNextRequest(null);",
+              "  } else {",
+              "    pm.environment.set(\"rejectEmployeeId\", String(user.id));",
+              "    const cookie = pm.response.headers.get(\"Set-Cookie\") || \"\";",
+              "    const match = cookie.match(/(?:^|[,;]\\s*)access_token=([^;]+)/i);",
+              "    pm.test(\"CWong access_token cookie is returned\", () => pm.expect(match).to.not.equal(null));",
+              "    if (match) pm.environment.set(\"rejectEmployeeAccessToken\", match[1]);",
+              "    else pm.execution.setNextRequest(null);",
+              "  }",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "12. CWong submits a request for rejection",
+      "description": "Create the third pending Vacation request. Its separate ID is used for the manager's required-comment rejection.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.environment.unset(\"rejectRequestId\");",
+              "const date = new Date();",
+              "date.setUTCDate(date.getUTCDate() + 7);",
+              "while (date.getUTCDay() === 0 || date.getUTCDay() === 6) date.setUTCDate(date.getUTCDate() + 1);",
+              "pm.environment.set(\"leaveStartDate\", date.toISOString().slice(0, 10));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Rejection-flow request is created\", () => pm.response.to.have.status(201));",
+              "const request = pm.response.json();",
+              "pm.expect(request.status).to.eql(\"PENDING\");",
+              "pm.environment.set(\"rejectRequestId\", String(request.id));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "access_token={{rejectEmployeeAccessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"leaveTypeId\": {{vacationLeaveTypeId}},\n  \"startDate\": \"{{leaveStartDate}}\",\n  \"endDate\": \"{{leaveStartDate}}\",\n  \"notes\": \"Postman rejection flow\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/requests"
+      }
+    },
+    {
+      "name": "13. Manager Chen reviews pending approvals",
+      "description": "Open the manager dashboard after all employee requests exist. Check that it includes JSmith's approval request and CWong's rejection request; ALee's cancelled request should no longer be pending.",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Cookie",
+            "value": "access_token={{managerAccessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/approvals/pending"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Manager pending dashboard is available\", () => pm.response.to.have.status(200));",
+              "const pending = pm.response.json();",
+              "pm.test(\"Dashboard includes JSmith's request\", () => pm.expect(pending.some(request => String(request.id) === pm.environment.get(\"approvedRequestId\"))).to.eql(true));",
+              "pm.test(\"Dashboard includes CWong's request\", () => pm.expect(pending.some(request => String(request.id) === pm.environment.get(\"rejectRequestId\"))).to.eql(true));",
+              "pm.test(\"Dashboard excludes cancelled request\", () => pm.expect(pending.some(request => String(request.id) === pm.environment.get(\"cancelRequestId\"))).to.eql(false));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "14. Manager Chen approves JSmith's request",
+      "description": "Approve the first employee request with an optional comment. The response should become APPROVED and the balance reservation should be deducted.",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "access_token={{managerAccessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"comment\": \"Approved by the Postman demo flow.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/approvals/{{approvedRequestId}}/approve"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Manager approves the request\", () => pm.response.to.have.status(200));",
+              "pm.expect(pm.response.json().status).to.eql(\"APPROVED\");"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "15. Manager Chen rejects CWong's request",
+      "description": "Reject the second employee request with a non-blank reason, exercising the API's required rejection-comment rule.",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "access_token={{managerAccessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"comment\": \"Please choose another date for team coverage.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/approvals/{{rejectRequestId}}/reject"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Manager rejects the request\", () => pm.response.to.have.status(200));",
+              "const request = pm.response.json();",
+              "pm.expect(request.status).to.eql(\"REJECTED\");",
+              "pm.expect(request.decisionComment).to.eql(\"Please choose another date for team coverage.\");"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "16. JSmith checks notifications",
+      "description": "Return to the approval-flow employee and verify their authenticated notification history endpoint after the manager decision.",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Cookie",
+            "value": "access_token={{approveEmployeeAccessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/notifications"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Employee notification history is available\", () => pm.response.to.have.status(200));",
+              "const notifications = pm.response.json();",
+              "pm.test(\"JSmith received the approval notification\", () => pm.expect(notifications.some(notification => String(notification.requestId) === pm.environment.get(\"approvedRequestId\") && notification.kind === \"APPROVED\")).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "17. JSmith checks request history",
+      "description": "Read the approval request's timeline as its owner to confirm that submission and approval history is available.",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Cookie",
+            "value": "access_token={{approveEmployeeAccessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/requests/{{approvedRequestId}}/history"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Request history is available\", () => pm.response.to.have.status(200));",
+              "const history = pm.response.json();",
+              "pm.test(\"History records the approval\", () => pm.expect(history.some(entry => entry.type === \"APPROVED\")).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "18. CWong checks notifications",
+      "description": "Verify the rejected employee can retrieve their own notification history after the manager decision.",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Cookie",
+            "value": "access_token={{rejectEmployeeAccessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/notifications"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Rejected employee notification history is available\", () => pm.response.to.have.status(200));",
+              "const notifications = pm.response.json();",
+              "pm.test(\"CWong received the rejection notification\", () => pm.expect(notifications.some(notification => String(notification.requestId) === pm.environment.get(\"rejectRequestId\") && notification.kind === \"REJECTED\")).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "19. CWong checks request history",
+      "description": "Read the rejection timeline as the request owner to confirm that the final decision is represented in history.",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Cookie",
+            "value": "access_token={{rejectEmployeeAccessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/requests/{{rejectRequestId}}/history"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Rejected request history is available\", () => pm.response.to.have.status(200));",
+              "const history = pm.response.json();",
+              "pm.test(\"History records the rejection\", () => pm.expect(history.some(entry => entry.type === \"REJECTED\")).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20. HR views all balances",
+      "description": "Use the HR persona to verify the role-restricted all-user balances endpoint after approve, reject, and cancel operations.",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Cookie",
+            "value": "access_token={{hrAccessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/balances"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HR all-balances report is available\", () => pm.response.to.have.status(200));",
+              "const balances = pm.response.json();",
+              "const vacation = balances.find(balance => String(balance.userId) === pm.environment.get(\"approveEmployeeId\") && Number(balance.leaveTypeId) === Number(pm.environment.get(\"vacationLeaveTypeId\")));",
+              "pm.test(\"HR report includes JSmith's Vacation balance\", () => pm.expect(vacation).to.exist);",
+              "pm.expect(vacation.totalDays).to.eql(19);",
+              "pm.expect(vacation.reservedDays).to.eql(0);",
+              "pm.expect(vacation.availableDays).to.eql(19);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "21. HR views JSmith's Vacation ledger",
+      "description": "Inspect the HR-only ledger for the approved employee. The script-saved employee ID and configured leave type ID avoid hard-coding account IDs from the seed database.",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Cookie",
+            "value": "access_token={{hrAccessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/balances/{{approveEmployeeId}}/{{vacationLeaveTypeId}}/ledger"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HR balance ledger is available\", () => pm.response.to.have.status(200));",
+              "const ledger = pm.response.json();",
+              "pm.test(\"Ledger records the approved one-day deduction\", () => pm.expect(ledger.some(entry => entry.kind === \"DEDUCT\" && String(entry.requestId) === pm.environment.get(\"approvedRequestId\") && entry.changeDays === -1)).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "22. HR views the complete audit trail",
+      "description": "Finish with the HR-only audit report. It demonstrates the complete request lifecycle and serves as a final verification after all employee and manager actions.",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Cookie",
+            "value": "access_token={{hrAccessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/audit"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HR audit report is available\", () => pm.response.to.have.status(200));",
+              "const report = pm.response.json();",
+              "const approved = report.find(request => String(request.requestId) === pm.environment.get(\"approvedRequestId\"));",
+              "const rejected = report.find(request => String(request.requestId) === pm.environment.get(\"rejectRequestId\"));",
+              "pm.test(\"Audit report includes JSmith's approved request\", () => pm.expect(approved).to.exist);",
+              "pm.test(\"Audit report confirms approval\", () => pm.expect(approved.status).to.eql(\"APPROVED\"));",
+              "pm.test(\"Audit report includes CWong's rejected request\", () => pm.expect(rejected).to.exist);",
+              "pm.test(\"Audit report confirms rejection\", () => pm.expect(rejected.status).to.eql(\"REJECTED\"));",
+              "pm.test(\"Audit history includes approval\", () => pm.expect(approved.history.some(entry => entry.type === \"APPROVED\")).to.eql(true));",
+              "pm.test(\"Audit history includes rejection\", () => pm.expect(rejected.history.some(entry => entry.type === \"REJECTED\")).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
