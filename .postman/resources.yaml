@@ -1,8 +1,0 @@
-# Use this workspace to collaborate
-workspace:
-  id: f73d70fc-baec-4eaa-8549-96d8b62a7120
-
-localResources:
-  specs:
-    - ../backend/target/classes/openapi.yaml
-    - ../backend/src/main/resources/openapi.yaml

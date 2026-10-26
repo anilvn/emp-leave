@@ -1,0 +1,1709 @@
+openapi: 3.1.0
+info:
+  title: Employee Leave Tracking System API (POC)
+  description: REST API for the Employee Leave Tracking System POC. This live document is generated from the controllers; the committed openapi.yaml remains the binding hand-written contract.
+  contact:
+    name: Anil
+  version: 0.1.0
+servers:
+  - url: http://localhost:8080
+    description: Backend directly (run the Spring Boot app; use this for Try it out)
+  - url: https://localhost/api
+    description: Full stack behind the HTTPS reverse proxy (FR55)
+security:
+  - cookieAuth: []
+tags:
+  - name: Notifications
+    description: The authenticated user's notification history
+  - name: Balances
+    description: Leave balance queries — personal view for all roles, full view for HR
+  - name: Approvals
+    description: Manager and HR views of pending decisions
+  - name: Team
+    description: Manager's view of their team's approved leave
+  - name: Audit
+    description: HR audit report — one entry per leave request, any status
+  - name: Leave Requests
+    description: Submit and manage leave requests
+  - name: Users
+    description: HR account administration (FR18-FR20, FR24)
+  - name: Auth
+    description: Login, logout and password change (FR56-FR58)
+paths:
+  /requests/{requestId}:
+    get:
+      tags:
+        - Leave Requests
+      summary: Get one leave request
+      description: Visible to the request owner, the owner's direct manager, and HR.
+      operationId: getLeaveRequest
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: The leave request
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/LeaveRequest'
+        '401':
+          description: No valid access_token cookie
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/LeaveRequest'
+        '403':
+          description: Caller is outside the request's permitted scope
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '404':
+          description: Request not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+    put:
+      tags:
+        - Leave Requests
+      summary: Modify a pending leave request
+      description: Only the request owner may edit a pending request. Leave type must remain unchanged.
+      operationId: updateLeaveRequest
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LeaveRequestUpdate'
+        required: true
+      responses:
+        '200':
+          description: Updated request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaveRequest'
+        '400':
+          description: Validation failed or leave type changed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '403':
+          description: Caller is not the request owner
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '404':
+          description: Request not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '409':
+          description: Request is terminal or balance is insufficient
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /balances/{userId}/{leaveTypeId}:
+    put:
+      tags:
+        - Balances
+      summary: Set a balance
+      description: HR_ADMIN only. Sets total_days for the given user and leave type; reason is required. Writes a SET ledger row (FR28, FR30).
+      operationId: setBalance
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: leaveTypeId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BalanceSet'
+        required: true
+      responses:
+        '200':
+          description: Updated balance
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/Balance'
+        '400':
+          description: Missing or blank reason, or negative totalDays
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '403':
+          description: Caller is not HR_ADMIN
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '409':
+          description: Would make total_days less than reserved_days
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /users:
+    get:
+      tags:
+        - Users
+      summary: List user accounts
+      description: HR only; no scope filter applied (FR24).
+      operationId: listUsers
+      responses:
+        '200':
+          description: All user accounts
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserResponse'
+        '403':
+          description: 'Caller is not HR (code: ACCESS_DENIED)'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+    post:
+      tags:
+        - Users
+      summary: Create a user account
+      description: HR only. Assigns a role and a manager and stores an HR-typed temporary password, BCrypt-hashed on save with must_change_password set true (FR18, FR19). managerId is required unless the role is HR_ADMIN and must reference a MANAGER or HR_ADMIN user.
+      operationId: createUser
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreateRequest'
+        required: true
+      responses:
+        '201':
+          description: Created user; must change password on first login
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: 'Missing field, managerId does not match the chosen role, or username already taken (code: VALIDATION_FAILED)'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '403':
+          description: 'Caller is not HR (code: ACCESS_DENIED)'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /users/{userId}/reset-password:
+    post:
+      tags:
+        - Users
+      summary: Reset a user's password
+      description: HR only. Generates a server-side temporary password, BCrypt-hashes it into the target's account with must_change_password set true, and revokes the target's active sessions (FR20, AD-8). The generated value is never logged.
+      operationId: resetPassword
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Temporary password issued
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/TemporaryPasswordResponse'
+        '403':
+          description: 'Caller is not HR (code: ACCESS_DENIED)'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '404':
+          description: 'No such user (code: NOT_FOUND)'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /requests:
+    get:
+      tags:
+        - Leave Requests
+      summary: List leave requests
+      description: Returns the caller's permitted requests, optionally filtered by status and employee.
+      operationId: listLeaveRequests
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - PENDING
+              - APPROVED
+              - REJECTED
+              - CANCELLED
+        - name: employeeId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Matching leave requests
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LeaveRequest'
+        '400':
+          description: Invalid status or employee id
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '401':
+          description: No valid access_token cookie
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LeaveRequest'
+        '403':
+          description: Requested employee is outside the caller's scope
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+    post:
+      tags:
+        - Leave Requests
+      summary: Submit a leave request
+      description: Working days are computed server-side (Mon-Fri inclusive, holidays ignored). Reserves the requested days against the employee's balance; refused if days exceed what's available.
+      operationId: submitLeaveRequest
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LeaveRequestCreateRequest'
+        required: true
+      responses:
+        '201':
+          description: Request created, status PENDING
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/LeaveRequest'
+        '400':
+          description: Validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '401':
+          description: No valid access_token cookie
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/LeaveRequest'
+        '403':
+          description: Password change is required
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '409':
+          description: Insufficient balance
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /requests/{requestId}/comments:
+    get:
+      tags:
+        - Leave Requests
+      summary: List comments on a leave request
+      description: Returns all discussion comments, oldest first. Visible to the request owner, the owner's direct manager, and HR.
+      operationId: listComments
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: All comments on the request, oldest first
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Comment'
+        '401':
+          description: No valid access_token cookie
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Comment'
+        '403':
+          description: Caller is outside the request's permitted scope
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '404':
+          description: Request not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+    post:
+      tags:
+        - Leave Requests
+      summary: Add a discussion comment to a leave request
+      description: Posts a comment visible to the request owner, the owner's direct manager, and HR. Comments may be added regardless of request status. An immutable audit event is written.
+      operationId: addComment
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommentCreateRequest'
+        required: true
+      responses:
+        '201':
+          description: Comment created
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/Comment'
+        '400':
+          description: Blank or missing body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '401':
+          description: No valid access_token cookie
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/Comment'
+        '403':
+          description: Caller is outside the request's permitted scope
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '404':
+          description: Request not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /requests/{requestId}/cancel:
+    post:
+      tags:
+        - Leave Requests
+      summary: Cancel a pending leave request
+      description: Only the request owner may cancel a pending request. Reserved days are released.
+      operationId: cancelLeaveRequest
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Cancelled request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaveRequest'
+        '401':
+          description: No valid access_token cookie
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/LeaveRequest'
+        '403':
+          description: Caller is not the request owner
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '404':
+          description: Request not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '409':
+          description: Request is no longer PENDING or its balance row is missing
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /balances/{userId}/{leaveTypeId}/adjust:
+    post:
+      tags:
+        - Balances
+      summary: Adjust a balance
+      description: HR_ADMIN only. Adds or removes days from total_days by a signed delta; reason is required. Writes an ADJUST ledger row (FR29, FR30).
+      operationId: adjustBalance
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: leaveTypeId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BalanceAdjust'
+        required: true
+      responses:
+        '200':
+          description: Updated balance
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/Balance'
+        '400':
+          description: Missing/blank reason, null or zero changeDays
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '403':
+          description: Caller is not HR_ADMIN
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '409':
+          description: Would take total_days below zero or reserved_days
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /auth/logout:
+    post:
+      tags:
+        - Auth
+      summary: Log out and clear the auth cookie
+      description: Revokes every active session for the caller, so an already-issued token cannot be reused (AD-8), and clears the access_token cookie.
+      operationId: logout
+      responses:
+        '204':
+          description: Logged out
+  /auth/login:
+    post:
+      tags:
+        - Auth
+      summary: Log in with username and password
+      description: Issues the HttpOnly/Secure/SameSite access_token cookie on success (FR56). Lockout is evaluated before any token is issued (FR57, AD-9).
+      operationId: login
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Login succeeded; access_token cookie set
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/UserAccount'
+        '401':
+          description: 'Invalid credentials (code: INVALID_CREDENTIALS)'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '423':
+          description: 'Account locked after 5 failed attempts (code: ACCOUNT_LOCKED, FR57)'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+      security: []
+  /auth/change-password:
+    post:
+      tags:
+        - Auth
+      summary: Change the current user's password
+      description: Required on first login after HR resets a password (FR20) and usable any time after that (FR56). The new password must be at least 8 characters and include both letters and numbers (NFR4).
+      operationId: changePassword
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+        required: true
+      responses:
+        '204':
+          description: Password changed
+        '400':
+          description: 'New password fails the password rule (code: VALIDATION_FAILED)'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '401':
+          description: 'Current password incorrect (code: INVALID_CREDENTIALS)'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /approvals/{requestId}/reject:
+    post:
+      tags:
+        - Approvals
+      summary: Reject a pending request
+      description: Rejects a request assigned to the authenticated caller. A non-blank comment is required.
+      operationId: reject
+      parameters:
+        - name: requestId
+          in: path
+          description: Leave request id
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectDecisionRequest'
+        required: true
+      responses:
+        '200':
+          description: Rejected request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaveRequest'
+        '400':
+          description: A non-blank rejection comment is required
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '401':
+          description: No valid access_token cookie
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '403':
+          description: Caller is not this request's assigned approver
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '404':
+          description: Request does not exist
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '409':
+          description: Request is no longer pending
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /approvals/{requestId}/approve:
+    post:
+      tags:
+        - Approvals
+      summary: Approve a pending request
+      description: Approves a request assigned to the authenticated caller. A comment is optional.
+      operationId: approve
+      parameters:
+        - name: requestId
+          in: path
+          description: Leave request id
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionRequest'
+      responses:
+        '200':
+          description: Approved request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaveRequest'
+        '400':
+          description: Malformed approval request body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '401':
+          description: No valid access_token cookie
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/LeaveRequest'
+        '403':
+          description: Caller is not this request's assigned approver
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '404':
+          description: Request does not exist
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '409':
+          description: Request is no longer pending
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /users/managers:
+    get:
+      tags:
+        - Users
+      summary: Manager dropdown options for the create-account form
+      description: HR only. Returns every MANAGER plus every HR_ADMIN, since a new top-level manager reports to an HR user (FR19). Backs the Manager field on the create-account form with real options rather than free text.
+      operationId: listManagerOptions
+      responses:
+        '200':
+          description: Users selectable as a manager
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ManagerOptionResponse'
+        '403':
+          description: 'Caller is not HR (code: ACCESS_DENIED)'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /team/leave:
+    get:
+      tags:
+        - Team
+      summary: Team leave by date
+      description: Returns the manager's direct reports' approved leave, optionally filtered to a date range. Each entry includes the request's full comment thread and history timeline (FR14, FR23).
+      operationId: teamLeave
+      parameters:
+        - name: from
+          in: query
+          description: Start of date range (inclusive). Omit for no lower bound.
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          description: End of date range (inclusive). Omit for no upper bound.
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Approved team leave entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TeamLeaveEntry'
+        '401':
+          description: No valid access_token cookie
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TeamLeaveEntry'
+        '403':
+          description: Caller does not have the MANAGER role
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /requests/{requestId}/history:
+    get:
+      tags:
+        - Leave Requests
+      summary: Get leave request history
+      description: Returns the request timeline, visible to its owner, the owner's direct manager, and HR.
+      operationId: getLeaveRequestHistory
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Chronological request history
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HistoryEntry'
+        '401':
+          description: No valid access_token cookie
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HistoryEntry'
+        '403':
+          description: Caller is outside the request's permitted scope
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '404':
+          description: Request not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /notifications:
+    get:
+      tags:
+        - Notifications
+      summary: Get my notification history
+      operationId: getMyNotificationHistory
+      responses:
+        '200':
+          description: Caller-owned notification rows
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NotificationResponse'
+        '401':
+          description: No valid access_token cookie
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NotificationResponse'
+        '403':
+          description: Password change is required
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NotificationResponse'
+  /balances:
+    get:
+      tags:
+        - Balances
+      summary: Get all balances
+      description: HR_ADMIN only (FR27). Returns every user's balance for every leave type. Optionally filtered by userId.
+      operationId: getAllBalances
+      parameters:
+        - name: userId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Balances, optionally filtered by user
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Balance'
+        '401':
+          description: No valid access_token cookie
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Balance'
+        '403':
+          description: Caller is not HR_ADMIN
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /balances/{userId}/{leaveTypeId}/ledger:
+    get:
+      tags:
+        - Balances
+      summary: Balance ledger history
+      description: HR_ADMIN only. Every balance_ledger row for this user and leave type — set, adjust, reserve, release, deduct — oldest first (FR30).
+      operationId: getLedger
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: leaveTypeId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Ledger entries for this user/leave type, oldest first
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BalanceLedgerEntry'
+        '401':
+          description: No valid access_token cookie
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BalanceLedgerEntry'
+        '403':
+          description: Caller is not HR_ADMIN
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /balances/me:
+    get:
+      tags:
+        - Balances
+      summary: Get my leave balances
+      description: Available to employees, managers and HR administrators. Returns every leave type; a missing balance row is returned with zero day counts.
+      operationId: getMyBalances
+      responses:
+        '200':
+          description: One balance for every leave type
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Balance'
+        '401':
+          description: No valid access_token cookie
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Balance'
+        '403':
+          description: Password change is required
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /audit:
+    get:
+      tags:
+        - Audit
+      summary: Audit trail
+      description: HR view only. Returns one AuditRequestReport per leave request — any status — newest submission first, with each request's full comment thread and History timeline nested. No filters; a single call returns the full audit trail (FR42-FR45, FR24).
+      operationId: auditTrail
+      responses:
+        '200':
+          description: Full audit report, one entry per leave request, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditRequestReport'
+        '401':
+          description: No valid access_token cookie
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditRequestReport'
+        '403':
+          description: Only HR can view the audit trail
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /approvals/pending:
+    get:
+      tags:
+        - Approvals
+      summary: Pending Approvals dashboard
+      description: Returns requests assigned to the authenticated manager or HR user with full decision context.
+      operationId: pendingApprovals
+      responses:
+        '200':
+          description: Pending requests with complete approval context
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalDetail'
+        '401':
+          description: No valid access_token cookie
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalDetail'
+        '403':
+          description: Caller is not an approver
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+components:
+  schemas:
+    LeaveRequestUpdate:
+      type: object
+      description: Payload for editing a pending leave request
+      properties:
+        leaveTypeId:
+          type: integer
+          format: int64
+          description: Must match the request's existing leave type
+          example: 1
+        startDate:
+          type: string
+          format: date
+          description: First day of leave (inclusive)
+          example: '2026-10-30'
+        endDate:
+          type: string
+          format: date
+          description: Last day of leave (inclusive)
+          example: '2026-11-03'
+        notes:
+          type:
+            - string
+            - 'null'
+          description: Optional free text
+          example: Trip shortened by a day
+      required:
+        - endDate
+        - leaveTypeId
+        - startDate
+    LeaveRequest:
+      type: object
+      description: A leave request
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Leave request id
+          example: 101
+        employeeId:
+          type: integer
+          format: int64
+          description: Employee who submitted the request
+          example: 5
+        approverId:
+          type: integer
+          format: int64
+          description: Manager or HR who may decide
+          example: 3
+        leaveTypeId:
+          type: integer
+          format: int64
+          description: Leave type id
+          example: 1
+        startDate:
+          type: string
+          format: date
+          description: First day of leave
+          example: '2026-10-29'
+        endDate:
+          type: string
+          format: date
+          description: Last day of leave
+          example: '2026-11-03'
+        workingDays:
+          type: integer
+          format: int32
+          description: Mon-Fri working days in range
+          example: 4
+        notes:
+          type:
+            - string
+            - 'null'
+          description: Optional notes
+          example: Family trip
+        status:
+          type: string
+          description: Current status
+          example: PENDING
+        submittedAt:
+          type: string
+          format: date-time
+          description: When the request was submitted
+        decidedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the request was decided
+        decisionComment:
+          type:
+            - string
+            - 'null'
+          description: Approver/rejector comment
+    ProblemDetail:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          format: int32
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri
+        properties:
+          type: object
+          additionalProperties: {}
+    BalanceSet:
+      type: object
+      description: Set a user's leave balance total days (FR28)
+      properties:
+        totalDays:
+          type: integer
+          format: int32
+          description: New total days, must be 0 or more
+          example: 20
+          minimum: 0
+        reason:
+          type: string
+          description: Required reason for the balance change
+          example: Annual Vacation allotment for 2027
+          minLength: 1
+      required:
+        - reason
+        - totalDays
+    Balance:
+      type: object
+      description: One leave balance for a user and leave type
+      properties:
+        userId:
+          type: integer
+          format: int64
+          description: User id
+          example: 5
+        leaveTypeId:
+          type: integer
+          format: int64
+          description: Leave type id
+          example: 1
+        totalDays:
+          type: integer
+          format: int32
+          description: Days allocated to the leave type
+          example: 20
+        reservedDays:
+          type: integer
+          format: int32
+          description: Days currently reserved
+          example: 4
+        availableDays:
+          type: integer
+          format: int32
+          description: Days available, calculated as totalDays minus reservedDays
+          example: 16
+    UserCreateRequest:
+      type: object
+      description: New account submitted to POST /users (FR18, FR19)
+      properties:
+        username:
+          type: string
+          description: Unique username
+          example: emp.blee
+          maxLength: 100
+          minLength: 0
+        role:
+          type: string
+          description: Role to assign
+          enum:
+            - EMPLOYEE
+            - MANAGER
+            - HR_ADMIN
+          example: EMPLOYEE
+        managerId:
+          type: integer
+          format: int64
+          description: Manager id; required unless role is HR_ADMIN, and must reference a MANAGER or HR_ADMIN user (FR19)
+          example: 4
+        temporaryPassword:
+          type: string
+          description: HR-typed temporary password; BCrypt-hashed on save and never stored or logged in plaintext (FR18)
+          example: Temp#2026
+          minLength: 1
+      required:
+        - role
+        - temporaryPassword
+        - username
+    UserResponse:
+      type: object
+      description: A user account
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: User id
+          example: 13
+        username:
+          type: string
+          description: Account username
+          example: emp.blee
+        role:
+          type: string
+          description: Assigned role (FR21)
+          enum:
+            - EMPLOYEE
+            - MANAGER
+            - HR_ADMIN
+          example: EMPLOYEE
+        managerId:
+          type: integer
+          format: int64
+          description: Manager id, or null for a top-level HR_ADMIN
+          example: 4
+        mustChangePassword:
+          type: boolean
+          description: True while a temporary password must still be replaced (FR20)
+          example: true
+        active:
+          type: boolean
+          description: Whether the account is active
+          example: true
+    TemporaryPasswordResponse:
+      type: object
+      description: Server-generated temporary password returned by POST /users/{userId}/reset-password (FR20)
+      properties:
+        temporaryPassword:
+          type: string
+          description: The generated temporary password the user must change at next login
+          example: Temp#8841
+    LeaveRequestCreateRequest:
+      type: object
+      description: Payload for submitting a new leave request
+      properties:
+        leaveTypeId:
+          type: integer
+          format: int64
+          description: References leave_types (Vacation, Sick, Parental, Sabbatical)
+          example: 1
+        startDate:
+          type: string
+          format: date
+          description: First day of leave (inclusive)
+          example: '2026-10-29'
+        endDate:
+          type: string
+          format: date
+          description: Last day of leave (inclusive); must be on or after startDate
+          example: '2026-11-03'
+        notes:
+          type:
+            - string
+            - 'null'
+          description: Optional free text
+          example: Family trip
+      required:
+        - endDate
+        - leaveTypeId
+        - startDate
+    CommentCreateRequest:
+      type: object
+      properties:
+        body:
+          type: string
+          minLength: 1
+      required:
+        - body
+    Comment:
+      type: object
+      description: A discussion comment on a leave request
+      properties:
+        id:
+          type: integer
+          format: int64
+        requestId:
+          type: integer
+          format: int64
+        authorId:
+          type: integer
+          format: int64
+        authorUsername:
+          type: string
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    BalanceAdjust:
+      type: object
+      description: Adjust a user's leave balance by a signed delta (FR29)
+      properties:
+        changeDays:
+          type: integer
+          format: int32
+          description: 'Signed delta: positive adds days, negative removes days; must not be zero'
+          example: 2
+        reason:
+          type: string
+          description: Required reason for the balance adjustment
+          example: Carryover correction after manual review
+          minLength: 1
+      required:
+        - changeDays
+        - reason
+    LoginRequest:
+      type: object
+      description: Credentials submitted to POST /auth/login
+      properties:
+        username:
+          type: string
+          description: Account username
+          example: emp.jsmith
+          minLength: 1
+        password:
+          type: string
+          description: Account password
+          example: Passw0rd1
+          minLength: 1
+      required:
+        - password
+        - username
+    UserAccount:
+      type: object
+      description: The authenticated user returned by POST /auth/login
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: User id
+          example: 5
+        username:
+          type: string
+          description: Account username
+          example: emp.jsmith
+        role:
+          type: string
+          description: Role governing access (FR21)
+          enum:
+            - EMPLOYEE
+            - MANAGER
+            - HR_ADMIN
+          example: EMPLOYEE
+        mustChangePassword:
+          type: boolean
+          description: True while a temporary password must still be replaced (FR20)
+          example: false
+    ChangePasswordRequest:
+      type: object
+      description: Password change submitted to POST /auth/change-password
+      properties:
+        currentPassword:
+          type: string
+          description: The caller's current password
+          example: Temp#2026
+          minLength: 1
+        newPassword:
+          type: string
+          description: 'New password: at least 8 characters, including both letters and numbers (NFR4)'
+          example: Passw0rd1
+          minLength: 1
+      required:
+        - currentPassword
+        - newPassword
+    RejectDecisionRequest:
+      type: object
+      description: Required non-blank reason accompanying request rejection
+      properties:
+        comment:
+          type: string
+          description: Non-blank reason for rejecting the request
+          example: Please resubmit after the month-end close.
+          minLength: 1
+          pattern: .*\S.*
+      required:
+        - comment
+    DecisionRequest:
+      type: object
+      description: Optional comment accompanying request approval
+      properties:
+        comment:
+          type:
+            - string
+            - 'null'
+          description: Optional comment for the employee
+          example: Enjoy your trip!
+    ManagerOptionResponse:
+      type: object
+      description: A user selectable as a manager in the create-account form (FR19)
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: User id
+          example: 3
+        username:
+          type: string
+          description: Account username
+          example: mgr.chen
+        role:
+          type: string
+          description: Role (MANAGER or HR_ADMIN)
+          enum:
+            - EMPLOYEE
+            - MANAGER
+            - HR_ADMIN
+          example: MANAGER
+    HistoryEntry:
+      type: object
+      description: One event in a leave request's chronological history
+      properties:
+        type:
+          type: string
+          enum:
+            - SUBMITTED
+            - EDITED
+            - CANCELLED
+            - APPROVED
+            - REJECTED
+            - COMMENT
+        actorId:
+          type: integer
+          format: int64
+        actorUsername:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        detail:
+          type: string
+    TeamLeaveEntry:
+      type: object
+      description: An approved leave entry in the team calendar view
+      properties:
+        requestId:
+          type: integer
+          format: int64
+        employeeId:
+          type: integer
+          format: int64
+        employeeUsername:
+          type: string
+        leaveTypeId:
+          type: integer
+          format: int64
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        workingDays:
+          type: integer
+          format: int32
+        status:
+          type: string
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Comment'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryEntry'
+    NotificationResponse:
+      type: object
+      description: A notification recorded for the authenticated user
+      properties:
+        id:
+          type: integer
+          format: int64
+        userId:
+          type: integer
+          format: int64
+        requestId:
+          type: integer
+          format: int64
+        kind:
+          type: string
+          enum:
+            - SUBMITTED
+            - APPROVED
+            - REJECTED
+        subject:
+          type: string
+        sentAt:
+          type: string
+          format: date-time
+    BalanceLedgerEntry:
+      type: object
+      description: balance_ledger table (FR30)
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Row id
+          example: 480
+        userId:
+          type: integer
+          format: int64
+          description: User id
+          example: 5
+        leaveTypeId:
+          type: integer
+          format: int64
+          description: Leave type id
+          example: 1
+        changeDays:
+          type: integer
+          format: int32
+          description: Signed change in days (positive = added, negative = removed)
+          example: 4
+        kind:
+          type: string
+          description: Why this ledger row was written
+          enum:
+            - SET
+            - ADJUST
+            - RESERVE
+            - RELEASE
+            - DEDUCT
+          example: ADJUST
+        reason:
+          type: string
+          description: Human-readable reason
+          example: Carryover correction after manual review
+        actorId:
+          type: integer
+          format: int64
+          description: User id of the actor who caused this change
+          example: 1
+        requestId:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: Leave request id that caused this row, null for HR-initiated changes
+          example: 101
+        createdAt:
+          type: string
+          format: date-time
+          description: When this row was written
+          example: '2026-10-22T09:15:00Z'
+    AuditRequestReport:
+      type: object
+      description: One leave request in the HR audit trail, with full comment thread and history timeline (FR42-FR45, FR15)
+      properties:
+        requestId:
+          type: integer
+          format: int64
+        employeeId:
+          type: integer
+          format: int64
+        employeeUsername:
+          type: string
+        leaveTypeId:
+          type: integer
+          format: int64
+        leaveTypeName:
+          type: string
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        workingDays:
+          type: integer
+          format: int32
+        status:
+          type: string
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Comment'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryEntry'
+    ApprovalDetail:
+      type: object
+      description: Pending request and all context needed to decide it
+      properties:
+        id:
+          type: integer
+          format: int64
+        employeeId:
+          type: integer
+          format: int64
+        approverId:
+          type: integer
+          format: int64
+        leaveTypeId:
+          type: integer
+          format: int64
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        workingDays:
+          type: integer
+          format: int32
+        notes:
+          type:
+            - string
+            - 'null'
+        status:
+          type: string
+          enum:
+            - PENDING
+            - APPROVED
+            - REJECTED
+            - CANCELLED
+        submittedAt:
+          type: string
+          format: date-time
+        decidedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        decisionComment:
+          type:
+            - string
+            - 'null'
+        employeeUsername:
+          type: string
+        leaveTypeName:
+          type: string
+        balance:
+          $ref: '#/components/schemas/Balance'
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Comment'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryEntry'
+      required:
+        - approverId
+        - balance
+        - comments
+        - decidedAt
+        - decisionComment
+        - employeeId
+        - employeeUsername
+        - endDate
+        - history
+        - id
+        - leaveTypeId
+        - leaveTypeName
+        - notes
+        - startDate
+        - status
+        - submittedAt
+        - workingDays
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      description: Session cookie set by POST /auth/login. HttpOnly, Secure, SameSite=Strict; 30-minute inactivity timeout (FR58). Not a bearer token in JavaScript-readable storage.
+      name: access_token
+      in: cookie

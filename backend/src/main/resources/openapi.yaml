@@ -33,7 +33,7 @@ info:
   contact:
     name: Anil
 servers:
-  - url: https://localhost/api
+  - url: http://localhost:8080
     description: Local dev stack, behind the HTTPS reverse proxy (FR55)
 
 tags:
