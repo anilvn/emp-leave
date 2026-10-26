@@ -1,0 +1,11 @@
+$kind: http-request
+url: "{{baseUrl}}/audit"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HR audit report loads', function () { pm.response.to.have.status(200); });
+      pm.test('Audit includes every request lifecycle result', function () { const rows = pm.response.json(); const expected = [['approvedRequestId','APPROVED'],['rejectedRequestId','REJECTED'],['cancelledRequestId','CANCELLED'],['pendingRequestId','PENDING'],['pdRequestId','APPROVED']]; expected.forEach(function (pair) { pm.expect(rows.some(function (r) { return String(r.requestId) === pm.environment.get(pair[0]) && r.status === pair[1]; })).to.eql(true); }); });
+      pm.test('Audit embeds request history and comment thread', function () { const row = pm.response.json().find(function (r) { return String(r.requestId) === pm.environment.get('approvedRequestId'); }); pm.expect(row.history.some(function (h) { return h.type === 'APPROVED'; })).to.eql(true); pm.expect(row.comments.some(function (c) { return c.body === 'Please review this request.'; })).to.eql(true); });
+    language: text/javascript
+order: 15000

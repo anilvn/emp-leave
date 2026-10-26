@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/requests/{{approvedRequestId}}/comments"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"body":"Please review this request."}'
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Discussion comment is created', function () { pm.response.to.have.status(201); });
+      pm.test('Comment is attached to Anil request', function () { pm.expect(String(pm.response.json().requestId)).to.eql(pm.environment.get('approvedRequestId')); });
+    language: text/javascript
+order: 7000

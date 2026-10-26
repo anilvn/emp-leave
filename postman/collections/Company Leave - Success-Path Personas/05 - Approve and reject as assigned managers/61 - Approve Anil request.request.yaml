@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/approvals/{{approvedRequestId}}/approve"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"comment":"Approved for the requested dates."}'
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Anil request is approved', function () { pm.response.to.have.status(200); });
+      pm.test('Approval status and comment are recorded', function () { const r = pm.response.json(); pm.expect(r.status).to.eql('APPROVED'); pm.expect(r.decisionComment).to.eql('Approved for the requested dates.'); });
+    language: text/javascript
+order: 3000

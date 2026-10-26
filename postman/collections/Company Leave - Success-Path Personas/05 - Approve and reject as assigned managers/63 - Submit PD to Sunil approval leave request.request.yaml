@@ -1,0 +1,18 @@
+$kind: http-request
+url: "{{baseUrl}}/requests"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"leaveTypeId":{{vacationTypeId}},"startDate":"{{dateB}}","endDate":"{{dateB}}","notes":"Postman success-path PD to Sunil approval request"}'
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Request created', function () { pm.response.to.have.status(201); });
+      const request = pm.response.json();
+      pm.test('Request is pending with expected owner, approver, type, and dates', function () { pm.expect(request.status).to.eql('PENDING'); pm.expect(request.workingDays).to.eql(1); pm.expect(String(request.employeeId)).to.eql(pm.environment.get('pdId')); pm.expect(String(request.approverId)).to.eql(pm.environment.get('sunilId')); pm.expect(String(request.leaveTypeId)).to.eql(pm.environment.get('vacationTypeId')); pm.expect(request.startDate).to.eql(pm.environment.get('dateB')); pm.expect(request.endDate).to.eql(pm.environment.get('dateB')); });
+      pm.test('Request ID is returned', function () { pm.expect(request.id).to.be.a('number').and.above(0); });
+      pm.environment.set('pdRequestId', String(request.id));
+    language: text/javascript
+order: 5000

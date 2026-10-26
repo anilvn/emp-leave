@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/balances/{{anilId}}/{{vacationTypeId}}/adjust"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"changeDays":1,"reason":"Postman ledger adjustment test"}'
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Balance adjustment succeeds', function () { pm.response.to.have.status(200); });
+      pm.test('Anil total becomes 21', function () { pm.expect(pm.response.json().totalDays).to.eql(21); });
+    language: text/javascript
+order: 8000

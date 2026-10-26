@@ -1,0 +1,10 @@
+$kind: http-request
+url: "{{baseUrl}}/notifications"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Anil notifications load', function () { pm.response.to.have.status(200); });
+      pm.test('Anil received approval notification', function () { pm.expect(pm.response.json().some(function (n) { return String(n.requestId) === pm.environment.get('approvedRequestId') && n.kind === 'APPROVED'; })).to.eql(true); });
+    language: text/javascript
+order: 5000

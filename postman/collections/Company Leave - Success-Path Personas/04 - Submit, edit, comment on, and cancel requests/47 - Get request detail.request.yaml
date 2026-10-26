@@ -1,0 +1,10 @@
+$kind: http-request
+url: "{{baseUrl}}/requests/{{approvedRequestId}}"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Request detail succeeds', function () { pm.response.to.have.status(200); });
+      pm.test('Detail belongs to Anil and is assigned to PD', function () { const r = pm.response.json(); pm.expect(String(r.id)).to.eql(pm.environment.get('approvedRequestId')); pm.expect(String(r.employeeId)).to.eql(pm.environment.get('anilId')); pm.expect(String(r.approverId)).to.eql(pm.environment.get('pdId')); });
+    language: text/javascript
+order: 5000

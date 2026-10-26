@@ -1,0 +1,10 @@
+$kind: http-request
+url: "{{baseUrl}}/approvals/pending"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('PD pending approvals load', function () { pm.response.to.have.status(200); });
+      pm.test('Pending list includes Anil, Jay, Rajesh, and excludes cancelled PG', function () { const ids = pm.response.json().map(function (r) { return String(r.id); }); ['approvedRequestId','rejectedRequestId','pendingRequestId'].forEach(function (id) { pm.expect(ids).to.include(pm.environment.get(id)); }); pm.expect(ids).not.to.include(pm.environment.get('cancelledRequestId')); });
+    language: text/javascript
+order: 2000

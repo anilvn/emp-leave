@@ -1,0 +1,10 @@
+$kind: http-request
+url: "{{baseUrl}}/balances"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HR can read organization balances', function () { pm.response.to.have.status(200); });
+      pm.test('All created test users have balances', function () { const ids = pm.response.json().map(function (b) { return String(b.userId); }); ['sunilId','pdId','anilId','jayId','pgId','rajeshId'].forEach(function (id) { pm.expect(ids).to.include(pm.environment.get(id)); }); });
+    language: text/javascript
+order: 12000

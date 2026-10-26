@@ -1,0 +1,13 @@
+$kind: http-request
+url: "{{baseUrl}}/team/leave?from={{dateA}}&to={{dateD}}"
+method: GET
+queryParams:
+  from: "{{dateA}}"
+  to: "{{dateD}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('PD team calendar loads', function () { pm.response.to.have.status(200); });
+      pm.test('PD sees Anil approved leave', function () { pm.expect(pm.response.json().some(function (r) { return String(r.requestId) === pm.environment.get('approvedRequestId'); })).to.eql(true); });
+    language: text/javascript
+order: 12000

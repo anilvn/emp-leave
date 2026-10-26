@@ -1,0 +1,28 @@
+$kind: http-request
+url: "{{baseUrl}}/users"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: "{\r
+
+    \    \"username\": \"{{anilUsername}}\",\r
+
+    \    \"role\": \"EMPLOYEE\",\r
+
+    \    \"managerId\": {{pdId}},\r
+
+    \    \"temporaryPassword\": \"{{temporaryPassword}}\"\r
+
+    }"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('User creation returns 201', function () { pm.response.to.have.status(201); });
+      const created = pm.response.json();
+      pm.test('Created user ID is returned', function () { pm.expect(created.id).to.be.a('number').and.above(0); });
+      pm.test('Created EMPLOYEE has expected manager', function () { pm.expect(created.username).to.eql(pm.environment.get('anilUsername')); pm.expect(created.role).to.eql('EMPLOYEE'); pm.expect(String(created.managerId)).to.eql(pm.environment.get('pdId')); pm.expect(created.mustChangePassword).to.eql(true); });
+      pm.environment.set('anilId', String(created.id));
+    language: text/javascript
+order: 6000

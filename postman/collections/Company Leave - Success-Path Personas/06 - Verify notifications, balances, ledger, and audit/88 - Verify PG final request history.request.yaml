@@ -1,0 +1,8 @@
+$kind: http-request
+url: "{{baseUrl}}/requests/{{cancelledRequestId}}/history"
+method: GET
+scripts:
+  - type: afterResponse
+    code: pm.test('PG request history includes cancellation', function () { pm.response.to.have.status(200); pm.expect(pm.response.json().some(function (h) { return h.type === 'CANCELLED'; })).to.eql(true); });
+    language: text/javascript
+order: 18000

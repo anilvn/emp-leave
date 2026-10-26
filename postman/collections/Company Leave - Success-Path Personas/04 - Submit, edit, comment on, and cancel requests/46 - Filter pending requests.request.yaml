@@ -1,0 +1,12 @@
+$kind: http-request
+url: "{{baseUrl}}/requests?status=PENDING"
+method: GET
+queryParams:
+  status: PENDING
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Pending request filter succeeds', function () { pm.response.to.have.status(200); });
+      pm.test('Pending filter returns only pending requests and includes Anil', function () { const requests = pm.response.json(); pm.expect(requests.length).to.be.above(0); pm.expect(requests.every(function (r) { return r.status === 'PENDING'; })).to.eql(true); pm.expect(requests.some(function (r) { return String(r.id) === pm.environment.get('approvedRequestId'); })).to.eql(true); });
+    language: text/javascript
+order: 4000

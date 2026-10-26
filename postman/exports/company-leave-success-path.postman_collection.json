@@ -1,0 +1,3121 @@
+{
+  "info": {
+    "_postman_id": "f0cd342d-8add-49ad-980f-4d04a59e5593",
+    "name": "Company Leave - Success-Path Personas",
+    "description": "Runs the success-focused HR-to-Sunil-to-PD-to-employee workflow described in postman-req.md. Covers every implemented API route with sequential persona logins, cookie authentication, generated unique users and future weekday dates, captured IDs, and response assertions. Run the full collection from the beginning. This collection creates accounts and changes balances/requests; use a disposable development database. Set Postman SSL certificate verification off for the local self-signed HTTPS proxy. The imported environment defaults to https://localhost/api. GET /auth/me is omitted because no controller route implements it.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "noauth"
+  },
+  "item": [
+    {
+      "name": "01 - HR setup and account creation",
+      "item": [
+        {
+          "name": "01 - Login HR",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{hrUsername}}\",\"password\":\"{{seedPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for HR', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are HR', function () { pm.expect(user.username).to.eql(pm.environment.get('hrUsername')); pm.expect(user.role).to.eql('HR_ADMIN'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('hrId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02 - List all users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HR can list users', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Configured HR account is present', function () { pm.expect(pm.response.json().some(function (u) { return u.username === pm.environment.get('hrUsername'); })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03 - List manager options",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/managers"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HR can list manager options', function () { pm.response.to.have.status(200); });",
+                  "pm.test('HR is available as a manager', function () { pm.expect(pm.response.json().some(function (u) { return String(u.id) === pm.environment.get('hrId'); })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04 - Create sunil",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{sunilUsername}}\",\"role\":\"MANAGER\",\"managerId\":{{hrId}},\"temporaryPassword\":\"{{temporaryPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('User creation returns 201', function () { pm.response.to.have.status(201); });",
+                  "const created = pm.response.json();",
+                  "pm.test('Created user ID is returned', function () { pm.expect(created.id).to.be.a('number').and.above(0); });",
+                  "pm.test('Created MANAGER has expected manager', function () { pm.expect(created.username).to.eql(pm.environment.get('sunilUsername')); pm.expect(created.role).to.eql('MANAGER'); pm.expect(String(created.managerId)).to.eql(pm.environment.get('hrId')); pm.expect(created.mustChangePassword).to.eql(true); });",
+                  "pm.environment.set('sunilId', String(created.id));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05 - Create pd",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"username\": \"{{pdUsername}}\",\r\n    \"role\": \"MANAGER\",\r\n    \"managerId\": {{sunilId}},\r\n    \"temporaryPassword\": \"{{temporaryPassword}}\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('User creation returns 201', function () { pm.response.to.have.status(201); });",
+                  "const created = pm.response.json();",
+                  "pm.test('Created user ID is returned', function () { pm.expect(created.id).to.be.a('number').and.above(0); });",
+                  "pm.test('Created MANAGER has expected manager', function () { pm.expect(created.username).to.eql(pm.environment.get('pdUsername')); pm.expect(created.role).to.eql('MANAGER'); pm.expect(String(created.managerId)).to.eql(pm.environment.get('sunilId')); pm.expect(created.mustChangePassword).to.eql(true); });",
+                  "pm.environment.set('pdId', String(created.id));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06 - Create anil",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{anilUsername}}\",\"role\":\"EMPLOYEE\",\"managerId\":{{pdId}},\"temporaryPassword\":\"{{temporaryPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('User creation returns 201', function () { pm.response.to.have.status(201); });",
+                  "const created = pm.response.json();",
+                  "pm.test('Created user ID is returned', function () { pm.expect(created.id).to.be.a('number').and.above(0); });",
+                  "pm.test('Created EMPLOYEE has expected manager', function () { pm.expect(created.username).to.eql(pm.environment.get('anilUsername')); pm.expect(created.role).to.eql('EMPLOYEE'); pm.expect(String(created.managerId)).to.eql(pm.environment.get('pdId')); pm.expect(created.mustChangePassword).to.eql(true); });",
+                  "pm.environment.set('anilId', String(created.id));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07 - Create jay",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{jayUsername}}\",\"role\":\"EMPLOYEE\",\"managerId\":{{pdId}},\"temporaryPassword\":\"{{temporaryPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('User creation returns 201', function () { pm.response.to.have.status(201); });",
+                  "const created = pm.response.json();",
+                  "pm.test('Created user ID is returned', function () { pm.expect(created.id).to.be.a('number').and.above(0); });",
+                  "pm.test('Created EMPLOYEE has expected manager', function () { pm.expect(created.username).to.eql(pm.environment.get('jayUsername')); pm.expect(created.role).to.eql('EMPLOYEE'); pm.expect(String(created.managerId)).to.eql(pm.environment.get('pdId')); pm.expect(created.mustChangePassword).to.eql(true); });",
+                  "pm.environment.set('jayId', String(created.id));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "08 - Create pg",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{pgUsername}}\",\"role\":\"EMPLOYEE\",\"managerId\":{{pdId}},\"temporaryPassword\":\"{{temporaryPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('User creation returns 201', function () { pm.response.to.have.status(201); });",
+                  "const created = pm.response.json();",
+                  "pm.test('Created user ID is returned', function () { pm.expect(created.id).to.be.a('number').and.above(0); });",
+                  "pm.test('Created EMPLOYEE has expected manager', function () { pm.expect(created.username).to.eql(pm.environment.get('pgUsername')); pm.expect(created.role).to.eql('EMPLOYEE'); pm.expect(String(created.managerId)).to.eql(pm.environment.get('pdId')); pm.expect(created.mustChangePassword).to.eql(true); });",
+                  "pm.environment.set('pgId', String(created.id));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "09 - Create rajesh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{rajeshUsername}}\",\"role\":\"EMPLOYEE\",\"managerId\":{{pdId}},\"temporaryPassword\":\"{{temporaryPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('User creation returns 201', function () { pm.response.to.have.status(201); });",
+                  "const created = pm.response.json();",
+                  "pm.test('Created user ID is returned', function () { pm.expect(created.id).to.be.a('number').and.above(0); });",
+                  "pm.test('Created EMPLOYEE has expected manager', function () { pm.expect(created.username).to.eql(pm.environment.get('rajeshUsername')); pm.expect(created.role).to.eql('EMPLOYEE'); pm.expect(String(created.managerId)).to.eql(pm.environment.get('pdId')); pm.expect(created.mustChangePassword).to.eql(true); });",
+                  "pm.environment.set('rajeshId', String(created.id));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "10 - Verify created reporting hierarchy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HR can verify created hierarchy', function () { pm.response.to.have.status(200); });",
+                  "const users = pm.response.json();",
+                  "pm.test('New accounts report to expected managers', function () { const byId = {}; users.forEach(function (u) { byId[String(u.id)] = u; }); pm.expect(String(byId[pm.environment.get('sunilId')].managerId)).to.eql(pm.environment.get('hrId')); pm.expect(String(byId[pm.environment.get('pdId')].managerId)).to.eql(pm.environment.get('sunilId')); ['anilId','jayId','pgId','rajeshId'].forEach(function (id) { pm.expect(String(byId[pm.environment.get(id)].managerId)).to.eql(pm.environment.get('pdId')); }); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "11 - Verify new managers are selectable",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/managers"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Manager options include the new managers', function () { pm.response.to.have.status(200); const managers = pm.response.json().map(function (u) { return String(u.id); }); pm.expect(managers).to.include(pm.environment.get('sunilId')); pm.expect(managers).to.include(pm.environment.get('pdId')); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Activate accounts and change temporary passwords",
+      "item": [
+        {
+          "name": "12 - Login Sunil with temporary password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{sunilUsername}}\",\"password\":\"{{temporaryPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Sunil with temporary password', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Sunil with temporary password', function () { pm.expect(user.username).to.eql(pm.environment.get('sunilUsername')); pm.expect(user.role).to.eql('MANAGER'); pm.expect(user.mustChangePassword).to.eql(true); });",
+                  "pm.environment.set('sunilId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "13 - Change Sunil password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/change-password"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"currentPassword\":\"{{temporaryPassword}}\",\"newPassword\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Password changed successfully', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "14 - Login Sunil with permanent password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{sunilUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Sunil with permanent password', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Sunil with permanent password', function () { pm.expect(user.username).to.eql(pm.environment.get('sunilUsername')); pm.expect(user.role).to.eql('MANAGER'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('sunilId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15 - Login PD with temporary password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{pdUsername}}\",\"password\":\"{{temporaryPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for PD with temporary password', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are PD with temporary password', function () { pm.expect(user.username).to.eql(pm.environment.get('pdUsername')); pm.expect(user.role).to.eql('MANAGER'); pm.expect(user.mustChangePassword).to.eql(true); });",
+                  "pm.environment.set('pdId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16 - Change PD password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/change-password"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"currentPassword\":\"{{temporaryPassword}}\",\"newPassword\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Password changed successfully', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17 - Login PD with permanent password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{pdUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for PD with permanent password', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are PD with permanent password', function () { pm.expect(user.username).to.eql(pm.environment.get('pdUsername')); pm.expect(user.role).to.eql('MANAGER'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('pdId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18 - Login Anil with temporary password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{anilUsername}}\",\"password\":\"{{temporaryPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Anil with temporary password', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Anil with temporary password', function () { pm.expect(user.username).to.eql(pm.environment.get('anilUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(true); });",
+                  "pm.environment.set('anilId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "19 - Change Anil password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/change-password"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"currentPassword\":\"{{temporaryPassword}}\",\"newPassword\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Password changed successfully', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "20 - Login Anil with permanent password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{anilUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Anil with permanent password', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Anil with permanent password', function () { pm.expect(user.username).to.eql(pm.environment.get('anilUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('anilId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "21 - Login Jay with temporary password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{jayUsername}}\",\"password\":\"{{temporaryPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Jay with temporary password', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Jay with temporary password', function () { pm.expect(user.username).to.eql(pm.environment.get('jayUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(true); });",
+                  "pm.environment.set('jayId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "22 - Change Jay password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/change-password"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"currentPassword\":\"{{temporaryPassword}}\",\"newPassword\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Password changed successfully', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "23 - Login Jay with permanent password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{jayUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Jay with permanent password', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Jay with permanent password', function () { pm.expect(user.username).to.eql(pm.environment.get('jayUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('jayId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "24 - Login PG with temporary password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{pgUsername}}\",\"password\":\"{{temporaryPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for PG with temporary password', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are PG with temporary password', function () { pm.expect(user.username).to.eql(pm.environment.get('pgUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(true); });",
+                  "pm.environment.set('pgId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "25 - Change PG password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/change-password"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"currentPassword\":\"{{temporaryPassword}}\",\"newPassword\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Password changed successfully', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "26 - Login PG with permanent password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{pgUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for PG with permanent password', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are PG with permanent password', function () { pm.expect(user.username).to.eql(pm.environment.get('pgUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('pgId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "27 - Login Rajesh with temporary password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{rajeshUsername}}\",\"password\":\"{{temporaryPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Rajesh with temporary password', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Rajesh with temporary password', function () { pm.expect(user.username).to.eql(pm.environment.get('rajeshUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(true); });",
+                  "pm.environment.set('rajeshId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "28 - Change Rajesh password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/change-password"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"currentPassword\":\"{{temporaryPassword}}\",\"newPassword\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Password changed successfully', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "29 - Login Rajesh with permanent password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{rajeshUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Rajesh with permanent password', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Rajesh with permanent password', function () { pm.expect(user.username).to.eql(pm.environment.get('rajeshUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('rajeshId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Allocate, adjust, and inspect balances",
+      "item": [
+        {
+          "name": "30 - Login HR for balance setup",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{hrUsername}}\",\"password\":\"{{seedPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for HR for balance setup', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are HR for balance setup', function () { pm.expect(user.username).to.eql(pm.environment.get('hrUsername')); pm.expect(user.role).to.eql('HR_ADMIN'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('hrId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "31 - Set sunil Vacation balance",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/balances/{{sunilId}}/{{vacationTypeId}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"totalDays\":20,\"reason\":\"Postman success-path test allocation\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Balance set succeeds', function () { pm.response.to.have.status(200); });",
+                  "const balance = pm.response.json();",
+                  "pm.test('Balance allocation is 20 days', function () { pm.expect(String(balance.userId)).to.eql(pm.environment.get('sunilId')); pm.expect(balance.totalDays).to.eql(20); pm.expect(balance.reservedDays).to.eql(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "32 - Set pd Vacation balance",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/balances/{{pdId}}/{{vacationTypeId}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"totalDays\":20,\"reason\":\"Postman success-path test allocation\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Balance set succeeds', function () { pm.response.to.have.status(200); });",
+                  "const balance = pm.response.json();",
+                  "pm.test('Balance allocation is 20 days', function () { pm.expect(String(balance.userId)).to.eql(pm.environment.get('pdId')); pm.expect(balance.totalDays).to.eql(20); pm.expect(balance.reservedDays).to.eql(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "33 - Set anil Vacation balance",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/balances/{{anilId}}/{{vacationTypeId}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"totalDays\":20,\"reason\":\"Postman success-path test allocation\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Balance set succeeds', function () { pm.response.to.have.status(200); });",
+                  "const balance = pm.response.json();",
+                  "pm.test('Balance allocation is 20 days', function () { pm.expect(String(balance.userId)).to.eql(pm.environment.get('anilId')); pm.expect(balance.totalDays).to.eql(20); pm.expect(balance.reservedDays).to.eql(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "34 - Set jay Vacation balance",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/balances/{{jayId}}/{{vacationTypeId}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"totalDays\":20,\"reason\":\"Postman success-path test allocation\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Balance set succeeds', function () { pm.response.to.have.status(200); });",
+                  "const balance = pm.response.json();",
+                  "pm.test('Balance allocation is 20 days', function () { pm.expect(String(balance.userId)).to.eql(pm.environment.get('jayId')); pm.expect(balance.totalDays).to.eql(20); pm.expect(balance.reservedDays).to.eql(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "35 - Set pg Vacation balance",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/balances/{{pgId}}/{{vacationTypeId}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"totalDays\":20,\"reason\":\"Postman success-path test allocation\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Balance set succeeds', function () { pm.response.to.have.status(200); });",
+                  "const balance = pm.response.json();",
+                  "pm.test('Balance allocation is 20 days', function () { pm.expect(String(balance.userId)).to.eql(pm.environment.get('pgId')); pm.expect(balance.totalDays).to.eql(20); pm.expect(balance.reservedDays).to.eql(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "36 - Set rajesh Vacation balance",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/balances/{{rajeshId}}/{{vacationTypeId}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"totalDays\":20,\"reason\":\"Postman success-path test allocation\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Balance set succeeds', function () { pm.response.to.have.status(200); });",
+                  "const balance = pm.response.json();",
+                  "pm.test('Balance allocation is 20 days', function () { pm.expect(String(balance.userId)).to.eql(pm.environment.get('rajeshId')); pm.expect(balance.totalDays).to.eql(20); pm.expect(balance.reservedDays).to.eql(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "37 - Adjust Anil balance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/balances/{{anilId}}/{{vacationTypeId}}/adjust"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"changeDays\":1,\"reason\":\"Postman ledger adjustment test\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Balance adjustment succeeds', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Anil total becomes 21', function () { pm.expect(pm.response.json().totalDays).to.eql(21); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "38 - Login Anil to inspect personal balances",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{anilUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Anil to inspect personal balances', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Anil to inspect personal balances', function () { pm.expect(user.username).to.eql(pm.environment.get('anilUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('anilId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "39 - Get my balances",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/balances/me"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Employee can read personal balances', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Anil has the allocated Vacation balance', function () { const b = pm.response.json().find(function (x) { return String(x.leaveTypeId) === pm.environment.get('vacationTypeId'); }); pm.expect(b).to.be.an('object'); pm.expect(b.totalDays).to.eql(21); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "40 - Login HR to inspect all balances",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{hrUsername}}\",\"password\":\"{{seedPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for HR to inspect all balances', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are HR to inspect all balances', function () { pm.expect(user.username).to.eql(pm.environment.get('hrUsername')); pm.expect(user.role).to.eql('HR_ADMIN'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('hrId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "41 - Get all balances",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/balances"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HR can read organization balances', function () { pm.response.to.have.status(200); });",
+                  "pm.test('All created test users have balances', function () { const ids = pm.response.json().map(function (b) { return String(b.userId); }); ['sunilId','pdId','anilId','jayId','pgId','rajeshId'].forEach(function (id) { pm.expect(ids).to.include(pm.environment.get(id)); }); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "42 - Read Anil balance ledger",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/balances/{{anilId}}/{{vacationTypeId}}/ledger"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HR can read the balance ledger', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Ledger includes set and adjustment entries', function () { const kinds = pm.response.json().map(function (e) { return e.kind; }); pm.expect(kinds).to.include('SET'); pm.expect(kinds).to.include('ADJUST'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - Submit, edit, comment on, and cancel requests",
+      "item": [
+        {
+          "name": "43 - Login Anil to create a request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{anilUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Anil to create a request', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Anil to create a request', function () { pm.expect(user.username).to.eql(pm.environment.get('anilUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('anilId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "44 - Submit Anil approval leave request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/requests"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"leaveTypeId\":{{vacationTypeId}},\"startDate\":\"{{dateA}}\",\"endDate\":\"{{dateA}}\",\"notes\":\"Postman success-path Anil approval request\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Request created', function () { pm.response.to.have.status(201); });",
+                  "const request = pm.response.json();",
+                  "pm.test('Request is pending with expected owner, approver, type, and dates', function () { pm.expect(request.status).to.eql('PENDING'); pm.expect(request.workingDays).to.eql(1); pm.expect(String(request.employeeId)).to.eql(pm.environment.get('anilId')); pm.expect(String(request.approverId)).to.eql(pm.environment.get('pdId')); pm.expect(String(request.leaveTypeId)).to.eql(pm.environment.get('vacationTypeId')); pm.expect(request.startDate).to.eql(pm.environment.get('dateA')); pm.expect(request.endDate).to.eql(pm.environment.get('dateA')); });",
+                  "pm.test('Request ID is returned', function () { pm.expect(request.id).to.be.a('number').and.above(0); });",
+                  "pm.environment.set('approvedRequestId', String(request.id));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "45 - List my requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/requests"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Employee can list own requests', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Created Anil request appears in list', function () { pm.expect(pm.response.json().some(function (r) { return String(r.id) === pm.environment.get('approvedRequestId'); })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "46 - Filter pending requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/requests?status=PENDING"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Pending request filter succeeds', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Pending filter returns only pending requests and includes Anil', function () { const requests = pm.response.json(); pm.expect(requests.length).to.be.above(0); pm.expect(requests.every(function (r) { return r.status === 'PENDING'; })).to.eql(true); pm.expect(requests.some(function (r) { return String(r.id) === pm.environment.get('approvedRequestId'); })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "47 - Get request detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/requests/{{approvedRequestId}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Request detail succeeds', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Detail belongs to Anil and is assigned to PD', function () { const r = pm.response.json(); pm.expect(String(r.id)).to.eql(pm.environment.get('approvedRequestId')); pm.expect(String(r.employeeId)).to.eql(pm.environment.get('anilId')); pm.expect(String(r.approverId)).to.eql(pm.environment.get('pdId')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "48 - Edit Anil pending request",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/requests/{{approvedRequestId}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"leaveTypeId\":{{vacationTypeId}},\"startDate\":\"{{dateB}}\",\"endDate\":\"{{dateB}}\",\"notes\":\"Updated test date while pending\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Pending request edit succeeds', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Dates and notes were updated', function () { const r = pm.response.json(); pm.expect(r.startDate).to.eql(pm.environment.get('dateB')); pm.expect(r.endDate).to.eql(pm.environment.get('dateB')); pm.expect(r.notes).to.eql('Updated test date while pending'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "49 - Add discussion comment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/requests/{{approvedRequestId}}/comments"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"body\":\"Please review this request.\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Discussion comment is created', function () { pm.response.to.have.status(201); });",
+                  "pm.test('Comment is attached to Anil request', function () { pm.expect(String(pm.response.json().requestId)).to.eql(pm.environment.get('approvedRequestId')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "50 - Read discussion comments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/requests/{{approvedRequestId}}/comments"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Comments can be read', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Added comment is returned', function () { pm.expect(pm.response.json().some(function (c) { return c.body === 'Please review this request.'; })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "51 - Read request history before decision",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/requests/{{approvedRequestId}}/history"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Request history can be read', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Submission, edit, and comment are recorded', function () { const types = pm.response.json().map(function (h) { return h.type; }); ['SUBMITTED','EDITED','COMMENT'].forEach(function (t) { pm.expect(types).to.include(t); }); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "52 - Login Jay to submit a request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{jayUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Jay to submit a request', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Jay to submit a request', function () { pm.expect(user.username).to.eql(pm.environment.get('jayUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('jayId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "53 - Submit Jay rejection leave request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/requests"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"leaveTypeId\":{{vacationTypeId}},\"startDate\":\"{{dateC}}\",\"endDate\":\"{{dateC}}\",\"notes\":\"Postman success-path Jay rejection request\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Request created', function () { pm.response.to.have.status(201); });",
+                  "const request = pm.response.json();",
+                  "pm.test('Request is pending with expected owner, approver, type, and dates', function () { pm.expect(request.status).to.eql('PENDING'); pm.expect(request.workingDays).to.eql(1); pm.expect(String(request.employeeId)).to.eql(pm.environment.get('jayId')); pm.expect(String(request.approverId)).to.eql(pm.environment.get('pdId')); pm.expect(String(request.leaveTypeId)).to.eql(pm.environment.get('vacationTypeId')); pm.expect(request.startDate).to.eql(pm.environment.get('dateC')); pm.expect(request.endDate).to.eql(pm.environment.get('dateC')); });",
+                  "pm.test('Request ID is returned', function () { pm.expect(request.id).to.be.a('number').and.above(0); });",
+                  "pm.environment.set('rejectedRequestId', String(request.id));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "54 - Login PG to submit a request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{pgUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for PG to submit a request', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are PG to submit a request', function () { pm.expect(user.username).to.eql(pm.environment.get('pgUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('pgId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "55 - Submit PG cancellation leave request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/requests"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"leaveTypeId\":{{vacationTypeId}},\"startDate\":\"{{dateD}}\",\"endDate\":\"{{dateD}}\",\"notes\":\"Postman success-path PG cancellation request\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Request created', function () { pm.response.to.have.status(201); });",
+                  "const request = pm.response.json();",
+                  "pm.test('Request is pending with expected owner, approver, type, and dates', function () { pm.expect(request.status).to.eql('PENDING'); pm.expect(request.workingDays).to.eql(1); pm.expect(String(request.employeeId)).to.eql(pm.environment.get('pgId')); pm.expect(String(request.approverId)).to.eql(pm.environment.get('pdId')); pm.expect(String(request.leaveTypeId)).to.eql(pm.environment.get('vacationTypeId')); pm.expect(request.startDate).to.eql(pm.environment.get('dateD')); pm.expect(request.endDate).to.eql(pm.environment.get('dateD')); });",
+                  "pm.test('Request ID is returned', function () { pm.expect(request.id).to.be.a('number').and.above(0); });",
+                  "pm.environment.set('cancelledRequestId', String(request.id));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "56 - Cancel PG pending request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/requests/{{cancelledRequestId}}/cancel"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Pending request is cancelled', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Final status is CANCELLED', function () { pm.expect(pm.response.json().status).to.eql('CANCELLED'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "57 - Login Rajesh to submit a request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{rajeshUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Rajesh to submit a request', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Rajesh to submit a request', function () { pm.expect(user.username).to.eql(pm.environment.get('rajeshUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('rajeshId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "58 - Submit Rajesh pending leave request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/requests"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"leaveTypeId\":{{vacationTypeId}},\"startDate\":\"{{dateA}}\",\"endDate\":\"{{dateA}}\",\"notes\":\"Postman success-path Rajesh pending request\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Request created', function () { pm.response.to.have.status(201); });",
+                  "const request = pm.response.json();",
+                  "pm.test('Request is pending with expected owner, approver, type, and dates', function () { pm.expect(request.status).to.eql('PENDING'); pm.expect(request.workingDays).to.eql(1); pm.expect(String(request.employeeId)).to.eql(pm.environment.get('rajeshId')); pm.expect(String(request.approverId)).to.eql(pm.environment.get('pdId')); pm.expect(String(request.leaveTypeId)).to.eql(pm.environment.get('vacationTypeId')); pm.expect(request.startDate).to.eql(pm.environment.get('dateA')); pm.expect(request.endDate).to.eql(pm.environment.get('dateA')); });",
+                  "pm.test('Request ID is returned', function () { pm.expect(request.id).to.be.a('number').and.above(0); });",
+                  "pm.environment.set('pendingRequestId', String(request.id));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 - Approve and reject as assigned managers",
+      "item": [
+        {
+          "name": "59 - Login PD to review direct reports",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{pdUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for PD to review direct reports', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are PD to review direct reports', function () { pm.expect(user.username).to.eql(pm.environment.get('pdUsername')); pm.expect(user.role).to.eql('MANAGER'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('pdId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "60 - Get PD pending approvals",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals/pending"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PD pending approvals load', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Pending list includes Anil, Jay, Rajesh, and excludes cancelled PG', function () { const ids = pm.response.json().map(function (r) { return String(r.id); }); ['approvedRequestId','rejectedRequestId','pendingRequestId'].forEach(function (id) { pm.expect(ids).to.include(pm.environment.get(id)); }); pm.expect(ids).not.to.include(pm.environment.get('cancelledRequestId')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "61 - Approve Anil request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/approvals/{{approvedRequestId}}/approve"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"comment\":\"Approved for the requested dates.\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Anil request is approved', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Approval status and comment are recorded', function () { const r = pm.response.json(); pm.expect(r.status).to.eql('APPROVED'); pm.expect(r.decisionComment).to.eql('Approved for the requested dates.'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "62 - Reject Jay request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/approvals/{{rejectedRequestId}}/reject"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"comment\":\"Please coordinate coverage before resubmitting.\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Jay request is rejected', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Rejection status and required reason are recorded', function () { const r = pm.response.json(); pm.expect(r.status).to.eql('REJECTED'); pm.expect(r.decisionComment).to.eql('Please coordinate coverage before resubmitting.'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "63 - Submit PD to Sunil approval leave request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/requests"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"leaveTypeId\":{{vacationTypeId}},\"startDate\":\"{{dateB}}\",\"endDate\":\"{{dateB}}\",\"notes\":\"Postman success-path PD to Sunil approval request\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Request created', function () { pm.response.to.have.status(201); });",
+                  "const request = pm.response.json();",
+                  "pm.test('Request is pending with expected owner, approver, type, and dates', function () { pm.expect(request.status).to.eql('PENDING'); pm.expect(request.workingDays).to.eql(1); pm.expect(String(request.employeeId)).to.eql(pm.environment.get('pdId')); pm.expect(String(request.approverId)).to.eql(pm.environment.get('sunilId')); pm.expect(String(request.leaveTypeId)).to.eql(pm.environment.get('vacationTypeId')); pm.expect(request.startDate).to.eql(pm.environment.get('dateB')); pm.expect(request.endDate).to.eql(pm.environment.get('dateB')); });",
+                  "pm.test('Request ID is returned', function () { pm.expect(request.id).to.be.a('number').and.above(0); });",
+                  "pm.environment.set('pdRequestId', String(request.id));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "64 - Get PD submission notification",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PD notification history loads', function () { pm.response.to.have.status(200); });",
+                  "pm.test('PD received direct-report submission notification', function () { pm.expect(pm.response.json().some(function (n) { return String(n.requestId) === pm.environment.get('approvedRequestId') && n.kind === 'SUBMITTED'; })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "65 - Login Sunil to review PD request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{sunilUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Sunil to review PD request', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Sunil to review PD request', function () { pm.expect(user.username).to.eql(pm.environment.get('sunilUsername')); pm.expect(user.role).to.eql('MANAGER'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('sunilId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "66 - Get Sunil pending approvals",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals/pending"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Sunil pending approvals load', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Sunil sees PD request assigned to Sunil', function () { pm.expect(pm.response.json().some(function (r) { return String(r.id) === pm.environment.get('pdRequestId') && String(r.approverId) === pm.environment.get('sunilId'); })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "67 - Approve PD request as Sunil",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/approvals/{{pdRequestId}}/approve"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"comment\":\"Approved.\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PD request is approved by Sunil', function () { pm.response.to.have.status(200); });",
+                  "pm.test('PD request status is APPROVED', function () { pm.expect(pm.response.json().status).to.eql('APPROVED'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "68 - Get Sunil team leave",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/team/leave?from={{dateA}}&to={{dateD}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Sunil team calendar loads', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Sunil sees PD approved leave', function () { pm.expect(pm.response.json().some(function (r) { return String(r.requestId) === pm.environment.get('pdRequestId'); })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "69 - Login PD to inspect team leave",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{pdUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for PD to inspect team leave', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are PD to inspect team leave', function () { pm.expect(user.username).to.eql(pm.environment.get('pdUsername')); pm.expect(user.role).to.eql('MANAGER'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('pdId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "70 - Get PD team leave",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/team/leave?from={{dateA}}&to={{dateD}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PD team calendar loads', function () { pm.response.to.have.status(200); });",
+                  "pm.test('PD sees Anil approved leave', function () { pm.expect(pm.response.json().some(function (r) { return String(r.requestId) === pm.environment.get('approvedRequestId'); })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 - Verify notifications, balances, ledger, and audit",
+      "item": [
+        {
+          "name": "71 - Get PD notification history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PD notifications load', function () { pm.response.to.have.status(200); });",
+                  "pm.test('PD received submissions from all four employees and Sunil approval notification', function () { const n = pm.response.json(); ['approvedRequestId','rejectedRequestId','cancelledRequestId','pendingRequestId'].forEach(function (id) { pm.expect(n.some(function (x) { return String(x.requestId) === pm.environment.get(id) && x.kind === 'SUBMITTED'; })).to.eql(true); }); pm.expect(n.some(function (x) { return String(x.requestId) === pm.environment.get('pdRequestId') && x.kind === 'APPROVED'; })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "72 - Login Sunil to inspect notifications",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{sunilUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Sunil to inspect notifications', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Sunil to inspect notifications', function () { pm.expect(user.username).to.eql(pm.environment.get('sunilUsername')); pm.expect(user.role).to.eql('MANAGER'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('sunilId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "73 - Get Sunil notification history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Sunil notifications load', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Sunil received PD submission notification', function () { const n = pm.response.json(); pm.expect(n.some(function (x) { return String(x.requestId) === pm.environment.get('pdRequestId') && x.kind === 'SUBMITTED'; })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "74 - Login Anil to inspect notification and balance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{anilUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Anil to inspect notification and balance', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Anil to inspect notification and balance', function () { pm.expect(user.username).to.eql(pm.environment.get('anilUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('anilId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "75 - Get Anil notifications",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Anil notifications load', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Anil received approval notification', function () { pm.expect(pm.response.json().some(function (n) { return String(n.requestId) === pm.environment.get('approvedRequestId') && n.kind === 'APPROVED'; })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "76 - Verify Anil post-approval balance",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/balances/me"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Anil balance loads after approval', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Approved day is deducted and reservation cleared', function () { const b = pm.response.json().find(function (x) { return String(x.leaveTypeId) === pm.environment.get('vacationTypeId'); }); pm.expect(b.totalDays).to.eql(20); pm.expect(b.reservedDays).to.eql(0); pm.expect(b.availableDays).to.eql(20); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "77 - Login Jay to inspect rejection notification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{jayUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Jay to inspect rejection notification', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Jay to inspect rejection notification', function () { pm.expect(user.username).to.eql(pm.environment.get('jayUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('jayId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "78 - Get Jay notifications",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Jay notifications load', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Jay received rejection notification', function () { pm.expect(pm.response.json().some(function (n) { return String(n.requestId) === pm.environment.get('rejectedRequestId') && n.kind === 'REJECTED'; })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "79 - Login PG to verify cancellation balance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{pgUsername}}\",\"password\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for PG to verify cancellation balance', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are PG to verify cancellation balance', function () { pm.expect(user.username).to.eql(pm.environment.get('pgUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('pgId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "80 - Verify PG cancellation released reservation",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/balances/me"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PG balance loads after cancellation', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Cancelled request leaves no reserved days', function () { const b = pm.response.json().find(function (x) { return String(x.leaveTypeId) === pm.environment.get('vacationTypeId'); }); pm.expect(b.totalDays).to.eql(20); pm.expect(b.reservedDays).to.eql(0); pm.expect(b.availableDays).to.eql(20); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "81 - Login HR for final reports",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{hrUsername}}\",\"password\":\"{{seedPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for HR for final reports', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are HR for final reports', function () { pm.expect(user.username).to.eql(pm.environment.get('hrUsername')); pm.expect(user.role).to.eql('HR_ADMIN'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('hrId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "82 - Read Anil final balance ledger",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/balances/{{anilId}}/{{vacationTypeId}}/ledger"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Anil ledger loads', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Anil ledger has expected changes for this request in chronological order', function () { const entries = pm.response.json(); const kinds = entries.map(function (e) { return e.kind; }); ['SET','ADJUST','RESERVE','DEDUCT'].forEach(function (k) { pm.expect(kinds).to.include(k); }); const requestEntries = entries.filter(function (e) { return String(e.requestId) === pm.environment.get('approvedRequestId'); }); pm.expect(requestEntries.some(function (e) { return e.kind === 'RESERVE'; })).to.eql(true); pm.expect(requestEntries.some(function (e) { return e.kind === 'DEDUCT'; })).to.eql(true); for (let i = 1; i < entries.length; i++) pm.expect(entries[i].createdAt >= entries[i - 1].createdAt).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "83 - Read Jay final balance ledger",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/balances/{{jayId}}/{{vacationTypeId}}/ledger"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Jay ledger includes reservation and rejection release for this request', function () { pm.response.to.have.status(200); const entries = pm.response.json(); const linked = entries.filter(function (e) { return String(e.requestId) === pm.environment.get('rejectedRequestId'); }).map(function (e) { return e.kind; }); pm.expect(linked).to.include('RESERVE'); pm.expect(linked).to.include('RELEASE'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "84 - Read PG final balance ledger",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/balances/{{pgId}}/{{vacationTypeId}}/ledger"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PG ledger includes reservation and cancellation release for this request', function () { pm.response.to.have.status(200); const ledger = pm.response.json(); const requestId = pm.environment.get('cancelledRequestId'); pm.expect(ledger.some(function (e) { return String(e.requestId) === requestId && e.kind === 'RESERVE'; })).to.eql(true); pm.expect(ledger.some(function (e) { return String(e.requestId) === requestId && e.kind === 'RELEASE'; })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "85 - Read HR audit report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/audit"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HR audit report loads', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Audit includes every request lifecycle result', function () { const rows = pm.response.json(); const expected = [['approvedRequestId','APPROVED'],['rejectedRequestId','REJECTED'],['cancelledRequestId','CANCELLED'],['pendingRequestId','PENDING'],['pdRequestId','APPROVED']]; expected.forEach(function (pair) { pm.expect(rows.some(function (r) { return String(r.requestId) === pm.environment.get(pair[0]) && r.status === pair[1]; })).to.eql(true); }); });",
+                  "pm.test('Audit embeds request history and comment thread', function () { const row = pm.response.json().find(function (r) { return String(r.requestId) === pm.environment.get('approvedRequestId'); }); pm.expect(row.history.some(function (h) { return h.type === 'APPROVED'; })).to.eql(true); pm.expect(row.comments.some(function (c) { return c.body === 'Please review this request.'; })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "86 - Verify Anil final request history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/requests/{{approvedRequestId}}/history"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Anil request history includes approval', function () { pm.response.to.have.status(200); pm.expect(pm.response.json().some(function (h) { return h.type === 'APPROVED'; })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "87 - Verify Jay final request history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/requests/{{rejectedRequestId}}/history"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Jay request history includes rejection', function () { pm.response.to.have.status(200); pm.expect(pm.response.json().some(function (h) { return h.type === 'REJECTED'; })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "88 - Verify PG final request history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/requests/{{cancelledRequestId}}/history"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PG request history includes cancellation', function () { pm.response.to.have.status(200); pm.expect(pm.response.json().some(function (h) { return h.type === 'CANCELLED'; })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "89 - Verify PD final request history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/requests/{{pdRequestId}}/history"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('PD request history includes approval', function () { pm.response.to.have.status(200); pm.expect(pm.response.json().some(function (h) { return h.type === 'APPROVED'; })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "90 - Verify final organization balances",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/balances"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HR final organization balances load', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Approved, rejected, cancelled, and pending requests update balances', function () { const balances = pm.response.json(); const getBalance = function (userKey) { const balance = balances.find(function (x) { return String(x.userId) === pm.environment.get(userKey) && String(x.leaveTypeId) === pm.environment.get('vacationTypeId'); }); pm.expect(balance, userKey + ' Vacation balance exists').to.not.eql(undefined); return balance; }; const anil = getBalance('anilId'); pm.expect(anil.totalDays).to.eql(20); pm.expect(anil.reservedDays).to.eql(0); pm.expect(anil.availableDays).to.eql(20); const jay = getBalance('jayId'); pm.expect(jay.totalDays).to.eql(20); pm.expect(jay.reservedDays).to.eql(0); pm.expect(jay.availableDays).to.eql(20); const pg = getBalance('pgId'); pm.expect(pg.totalDays).to.eql(20); pm.expect(pg.reservedDays).to.eql(0); pm.expect(pg.availableDays).to.eql(20); const rajesh = getBalance('rajeshId'); pm.expect(rajesh.totalDays).to.eql(20); pm.expect(rajesh.reservedDays).to.eql(1); pm.expect(rajesh.availableDays).to.eql(19); const pd = getBalance('pdId'); pm.expect(pd.totalDays).to.eql(19); pm.expect(pd.reservedDays).to.eql(0); pm.expect(pd.availableDays).to.eql(19); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 - Reset password and logout",
+      "item": [
+        {
+          "name": "91 - Reset Rajesh password as HR",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{rajeshId}}/reset-password"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HR reset password succeeds', function () { pm.response.to.have.status(200); });",
+                  "const reset = pm.response.json();",
+                  "pm.test('Temporary password is returned', function () { pm.expect(reset.temporaryPassword).to.be.a('string').and.not.empty; });",
+                  "pm.environment.set('resetPassword', reset.temporaryPassword);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "92 - Login Rajesh with reset password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{rajeshUsername}}\",\"password\":\"{{resetPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Rajesh with reset password', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Rajesh with reset password', function () { pm.expect(user.username).to.eql(pm.environment.get('rajeshUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(true); });",
+                  "pm.environment.set('rajeshId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "93 - Change Rajesh after HR reset password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/change-password"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"currentPassword\":\"{{resetPassword}}\",\"newPassword\":\"{{resetNewPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Password changed successfully', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "94 - Login Rajesh with new reset password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\":\"{{rajeshUsername}}\",\"password\":\"{{resetNewPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds for Rajesh with new reset password', function () { pm.response.to.have.status(200); });",
+                  "const user = pm.response.json();",
+                  "pm.test('Identity and role are Rajesh with new reset password', function () { pm.expect(user.username).to.eql(pm.environment.get('rajeshUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(false); });",
+                  "pm.environment.set('rajeshId', String(user.id));",
+                  "pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "95 - Logout Rajesh",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Logout succeeds', function () { pm.response.to.have.status(204); });",
+                  "pm.test('Auth cookie is cleared', function () { const cookie = (pm.response.headers.get('Set-Cookie') || '').toLowerCase(); pm.expect(cookie).to.include('access_token=;'); pm.expect(cookie).to.include('max-age=0'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (pm.info.requestName === '01 - Login HR' || !pm.environment.get('runId')) {",
+          "  const suffix = new Date().toISOString().replace(/\\D/g, '') + Math.random().toString(36).slice(2, 6);",
+          "  pm.environment.set('runId', suffix);",
+          "  ['hrId','sunilId','pdId','anilId','jayId','pgId','rajeshId','approvedRequestId','rejectedRequestId','cancelledRequestId','pendingRequestId','pdRequestId','resetPassword'].forEach(function (k) { pm.environment.unset(k); });",
+          "  pm.environment.set('sunilUsername', 'sunil.' + suffix);",
+          "  pm.environment.set('pdUsername', 'pd.' + suffix);",
+          "  pm.environment.set('anilUsername', 'anil.' + suffix);",
+          "  pm.environment.set('jayUsername', 'jay.' + suffix);",
+          "  pm.environment.set('pgUsername', 'pg.' + suffix);",
+          "  pm.environment.set('rajeshUsername', 'rajesh.' + suffix);",
+          "  let day = new Date(); day.setUTCHours(12, 0, 0, 0);",
+          "  ['dateA','dateB','dateC','dateD'].forEach(function (key) { do { day.setUTCDate(day.getUTCDate() + 1); } while (day.getUTCDay() === 0 || day.getUTCDay() === 6); pm.environment.set(key, day.toISOString().slice(0, 10)); });",
+          "  if (!pm.environment.get('vacationTypeId')) pm.environment.set('vacationTypeId', '1');",
+          "}"
+        ]
+      }
+    }
+  ]
+}

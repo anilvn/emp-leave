@@ -1,0 +1,8 @@
+$kind: http-request
+url: "{{baseUrl}}/balances/{{jayId}}/{{vacationTypeId}}/ledger"
+method: GET
+scripts:
+  - type: afterResponse
+    code: pm.test('Jay ledger includes reservation and rejection release for this request', function () { pm.response.to.have.status(200); const entries = pm.response.json(); const linked = entries.filter(function (e) { return String(e.requestId) === pm.environment.get('rejectedRequestId'); }).map(function (e) { return e.kind; }); pm.expect(linked).to.include('RESERVE'); pm.expect(linked).to.include('RELEASE'); });
+    language: text/javascript
+order: 13000

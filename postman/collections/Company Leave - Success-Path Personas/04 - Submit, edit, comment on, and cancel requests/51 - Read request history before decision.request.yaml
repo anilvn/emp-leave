@@ -1,0 +1,10 @@
+$kind: http-request
+url: "{{baseUrl}}/requests/{{approvedRequestId}}/history"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Request history can be read', function () { pm.response.to.have.status(200); });
+      pm.test('Submission, edit, and comment are recorded', function () { const types = pm.response.json().map(function (h) { return h.type; }); ['SUBMITTED','EDITED','COMMENT'].forEach(function (t) { pm.expect(types).to.include(t); }); });
+    language: text/javascript
+order: 9000

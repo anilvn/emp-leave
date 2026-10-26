@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/approvals/{{rejectedRequestId}}/reject"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"comment":"Please coordinate coverage before resubmitting."}'
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Jay request is rejected', function () { pm.response.to.have.status(200); });
+      pm.test('Rejection status and required reason are recorded', function () { const r = pm.response.json(); pm.expect(r.status).to.eql('REJECTED'); pm.expect(r.decisionComment).to.eql('Please coordinate coverage before resubmitting.'); });
+    language: text/javascript
+order: 4000

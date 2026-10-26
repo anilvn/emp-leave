@@ -1,0 +1,8 @@
+$kind: http-request
+url: "{{baseUrl}}/balances/{{pgId}}/{{vacationTypeId}}/ledger"
+method: GET
+scripts:
+  - type: afterResponse
+    code: pm.test('PG ledger includes reservation and cancellation release for this request', function () { pm.response.to.have.status(200); const ledger = pm.response.json(); const requestId = pm.environment.get('cancelledRequestId'); pm.expect(ledger.some(function (e) { return String(e.requestId) === requestId && e.kind === 'RESERVE'; })).to.eql(true); pm.expect(ledger.some(function (e) { return String(e.requestId) === requestId && e.kind === 'RELEASE'; })).to.eql(true); });
+    language: text/javascript
+order: 14000

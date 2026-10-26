@@ -6,7 +6,7 @@ This guide exercises every API route implemented by the Employee Leave Tracking 
 HR admin → Sunil (manager) → PD (manager) → Anil, Jay, PG, Rajesh (employees)
 ```
 
-The workflow creates test accounts, changes their temporary passwords, provisions balances, and exercises request submission, edit, comment, approval, rejection, cancellation, team leave, notifications, balance ledger, and audit. It changes local application data; use a development/test instance.
+The workflow creates test accounts, changes their temporary passwords, provisions balances, and exercises request submission, edit, comment, approval, rejection, cancellation, team leave, notifications, balance ledger, and audit. It changes local application data; use a disposable development/test database only. The collection creates unique accounts and does not clean up account, ledger, or audit history, so discard or re-seed that database before repeating the run rather than using a shared instance.
 
 ## 1. Configure Postman
 
@@ -15,15 +15,20 @@ Create a Postman environment with these initial values:
 | Variable | Initial value |
 |---|---|
 | `baseUrl` | `https://localhost/api` |
-| `runId` | A unique suffix for this run, e.g. `20261026a` |
+| `hrUsername` | `hr.admin` |
+| `seedPassword` | `Passw0rd1` |
+| `runId` | Leave blank when using the imported collection; enter a unique suffix for manual requests |
 | `vacationTypeId` | `1` (Vacation in a fresh database seeded by Flyway) |
-| `dateA`, `dateB`, `dateC`, `dateD` | Four upcoming weekdays in `YYYY-MM-DD` format |
+| `dateA`, `dateB`, `dateC`, `dateD` | Leave blank when using the imported collection; enter four distinct future weekdays for manual requests |
 | `temporaryPassword` | `Temp2026` |
 | `newPassword` | `Passw0rd1` |
+| `resetNewPassword` | `Passw0rd2` |
+
+To import the collection into Postman, use the [Postman v2.1 collection export](./postman/exports/company-leave-success-path.postman_collection.json) and [local environment export](./postman/exports/company-leave-local.postman_environment.json). Alternatively, the workspace-native collection and environment are available in `postman/collections/` and `postman/environments/`. Select the environment, enable Postman's cookie jar, and run the full collection from the beginning. Its initializer populates the generated run ID and future weekday dates before the first request; later scripts capture user and request IDs automatically. If constructing requests outside the collection, set a unique run ID and four distinct future weekdays yourself instead of leaving those values blank.
 
 Use the Postman cookie jar and keep SSL certificate verification disabled for the local self-signed certificate. The API issues an `HttpOnly; Secure` `access_token` cookie at login. Do not extract a token from the JSON body or add an Authorization header. Use `{{baseUrl}}` in every request URL. On Docker Compose, `https://localhost/api` is the documented proxy URL. Keep the cookie jar enabled so Postman sends the current user's cookie automatically.
 
-Choose four distinct future weekdays for the date variables. The API counts Monday through Friday inclusively and ignores public holidays. Use one-day ranges for the simple lifecycle checks; use `dateA` and `dateB` to make the edit visibly change the dates.
+The collection initializer generates four distinct future weekdays before the first request. The API counts Monday through Friday inclusively and ignores public holidays. The generated dates are one-day ranges: Anil starts on `dateA` and is edited to `dateB`; Jay uses `dateC`; PG uses `dateD`; Rajesh uses `dateA`; and PD uses `dateB`.
 
 When a step says to switch users, send the login request for that account first; the cookie jar then contains that user's active session. Copy each returned user or request `id` into the matching environment variable before continuing.
 
@@ -182,7 +187,7 @@ While signed in as the corresponding user, exercise:
    ```
 
    Expect `200`, `status: "REJECTED"`, and the decision comment. Rejection releases the reserved day.
-4. As PD, submit a leave request for PD using the same `POST /requests` body with `dateC`. Save its ID as `pdRequestId`; expect `approverId: {{sunilId}}`.
+4. As PD, submit a leave request for PD using the same `POST /requests` body with `dateB`. Save its ID as `pdRequestId`; expect `approverId: {{sunilId}}`.
 5. As Sunil, call **`GET {{baseUrl}}/approvals/pending`**, then approve PD's request:
 
    **`POST {{baseUrl}}/approvals/{{pdRequestId}}/approve`**
@@ -197,7 +202,7 @@ While signed in as the corresponding user, exercise:
 
 ## 7. Verify notifications, balances, and audit
 
-- **Notifications:** login as PD, Sunil, Anil, and Jay in turn and call `GET {{baseUrl}}/notifications` for each. PD receives submissions from direct reports; Sunil receives PD's submission and approval; Anil and Jay receive their decision notifications. Comments and cancellations do not generate notifications in this implementation.
+- **Notifications:** login as PD, Sunil, Anil, and Jay in turn and call `GET {{baseUrl}}/notifications` for each. PD receives submissions from direct reports and the approval of PD's own request; Sunil receives PD's submission. Anil and Jay receive their decision notifications. Comments and cancellations do not generate notifications in this implementation.
 - **Balances after decisions:** login as Anil and call `GET {{baseUrl}}/balances/me`; the approved one-day Vacation request has been deducted. Login as PG and verify the cancelled request no longer reserves a day.
 - **Ledger:** as HR, call `GET {{baseUrl}}/balances/{{anilId}}/{{vacationTypeId}}/ledger`; expect `SET`, `ADJUST`, `RESERVE`, and `DEDUCT` entries. Check Jay's and PG's ledgers for the reservation and release entries.
 - **Audit report:** as HR, call `GET {{baseUrl}}/audit`. Expect one entry per request, including pending Rajesh, approved Anil and PD, rejected Jay, and cancelled PG, with each request's history and comments.

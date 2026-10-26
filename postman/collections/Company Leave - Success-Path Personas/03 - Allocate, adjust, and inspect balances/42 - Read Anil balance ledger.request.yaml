@@ -1,0 +1,10 @@
+$kind: http-request
+url: "{{baseUrl}}/balances/{{anilId}}/{{vacationTypeId}}/ledger"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HR can read the balance ledger', function () { pm.response.to.have.status(200); });
+      pm.test('Ledger includes set and adjustment entries', function () { const kinds = pm.response.json().map(function (e) { return e.kind; }); pm.expect(kinds).to.include('SET'); pm.expect(kinds).to.include('ADJUST'); });
+    language: text/javascript
+order: 13000

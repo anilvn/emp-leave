@@ -1,0 +1,10 @@
+$kind: http-request
+url: "{{baseUrl}}/requests/{{approvedRequestId}}/comments"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Comments can be read', function () { pm.response.to.have.status(200); });
+      pm.test('Added comment is returned', function () { pm.expect(pm.response.json().some(function (c) { return c.body === 'Please review this request.'; })).to.eql(true); });
+    language: text/javascript
+order: 8000

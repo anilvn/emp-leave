@@ -130,3 +130,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-5-the-hr-audit-report-one-entry-per-request.md`
   summary: Refactor `listComments` and `history` in `LeaveRequestService` to delegate to the new private `assembleComments`/`assembleHistory` helpers to eliminate duplication.
   evidence: The private helpers extract the same assembly logic as the public methods without the `findById` + access-check preamble. Any future Comment or HistoryEntry field addition must currently be made in two places. Refactoring the public methods to call the private helpers would make them the single source of truth.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-postman-success-path-collection-2.md`
+  summary: Run the success-path collection against a confirmed disposable seeded API/database.
+  evidence: The collection was not executed against a live API because it creates accounts and mutates balances, requests, ledger, and audit history; run it only after a disposable target and reset plan are confirmed.

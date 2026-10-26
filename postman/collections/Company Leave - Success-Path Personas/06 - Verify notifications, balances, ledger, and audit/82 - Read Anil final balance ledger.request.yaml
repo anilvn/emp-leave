@@ -1,0 +1,10 @@
+$kind: http-request
+url: "{{baseUrl}}/balances/{{anilId}}/{{vacationTypeId}}/ledger"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Anil ledger loads', function () { pm.response.to.have.status(200); });
+      pm.test('Anil ledger has expected changes for this request in chronological order', function () { const entries = pm.response.json(); const kinds = entries.map(function (e) { return e.kind; }); ['SET','ADJUST','RESERVE','DEDUCT'].forEach(function (k) { pm.expect(kinds).to.include(k); }); const requestEntries = entries.filter(function (e) { return String(e.requestId) === pm.environment.get('approvedRequestId'); }); pm.expect(requestEntries.some(function (e) { return e.kind === 'RESERVE'; })).to.eql(true); pm.expect(requestEntries.some(function (e) { return e.kind === 'DEDUCT'; })).to.eql(true); for (let i = 1; i < entries.length; i++) pm.expect(entries[i].createdAt >= entries[i - 1].createdAt).to.eql(true); });
+    language: text/javascript
+order: 12000

@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/requests/{{approvedRequestId}}"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"leaveTypeId":{{vacationTypeId}},"startDate":"{{dateB}}","endDate":"{{dateB}}","notes":"Updated test date while pending"}'
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Pending request edit succeeds', function () { pm.response.to.have.status(200); });
+      pm.test('Dates and notes were updated', function () { const r = pm.response.json(); pm.expect(r.startDate).to.eql(pm.environment.get('dateB')); pm.expect(r.endDate).to.eql(pm.environment.get('dateB')); pm.expect(r.notes).to.eql('Updated test date while pending'); });
+    language: text/javascript
+order: 6000

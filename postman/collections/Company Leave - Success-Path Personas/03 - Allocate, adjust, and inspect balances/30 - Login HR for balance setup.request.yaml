@@ -1,0 +1,18 @@
+$kind: http-request
+url: "{{baseUrl}}/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"username":"{{hrUsername}}","password":"{{seedPassword}}"}'
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Login succeeds for HR for balance setup', function () { pm.response.to.have.status(200); });
+      const user = pm.response.json();
+      pm.test('Identity and role are HR for balance setup', function () { pm.expect(user.username).to.eql(pm.environment.get('hrUsername')); pm.expect(user.role).to.eql('HR_ADMIN'); pm.expect(user.mustChangePassword).to.eql(false); });
+      pm.environment.set('hrId', String(user.id));
+      pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });
+    language: text/javascript
+order: 1000

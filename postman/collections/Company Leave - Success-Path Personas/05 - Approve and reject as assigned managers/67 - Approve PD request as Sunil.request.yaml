@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/approvals/{{pdRequestId}}/approve"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"comment":"Approved."}'
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('PD request is approved by Sunil', function () { pm.response.to.have.status(200); });
+      pm.test('PD request status is APPROVED', function () { pm.expect(pm.response.json().status).to.eql('APPROVED'); });
+    language: text/javascript
+order: 9000

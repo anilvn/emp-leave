@@ -1,0 +1,10 @@
+$kind: http-request
+url: "{{baseUrl}}/balances/me"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('PG balance loads after cancellation', function () { pm.response.to.have.status(200); });
+      pm.test('Cancelled request leaves no reserved days', function () { const b = pm.response.json().find(function (x) { return String(x.leaveTypeId) === pm.environment.get('vacationTypeId'); }); pm.expect(b.totalDays).to.eql(20); pm.expect(b.reservedDays).to.eql(0); pm.expect(b.availableDays).to.eql(20); });
+    language: text/javascript
+order: 10000

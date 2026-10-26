@@ -1,0 +1,18 @@
+$kind: http-request
+url: "{{baseUrl}}/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: '{"username":"{{anilUsername}}","password":"{{newPassword}}"}'
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Login succeeds for Anil to inspect personal balances', function () { pm.response.to.have.status(200); });
+      const user = pm.response.json();
+      pm.test('Identity and role are Anil to inspect personal balances', function () { pm.expect(user.username).to.eql(pm.environment.get('anilUsername')); pm.expect(user.role).to.eql('EMPLOYEE'); pm.expect(user.mustChangePassword).to.eql(false); });
+      pm.environment.set('anilId', String(user.id));
+      pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });
+    language: text/javascript
+order: 9000

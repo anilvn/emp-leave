@@ -1,0 +1,64 @@
+name: Company Leave - Local Success Path
+values:
+  - key: baseUrl
+    value: 'https://localhost/api'
+  - key: hrUsername
+    value: hr.admin
+  - key: seedPassword
+    value: Passw0rd1
+  - key: temporaryPassword
+    value: Temp2026
+  - key: newPassword
+    value: Passw0rd1
+  - key: resetNewPassword
+    value: Passw0rd2
+  - key: vacationTypeId
+    value: '1'
+  - key: runId
+    value: ''
+  - key: dateA
+    value: ''
+  - key: dateB
+    value: ''
+  - key: dateC
+    value: ''
+  - key: dateD
+    value: ''
+  - key: hrId
+    value: ''
+  - key: sunilUsername
+    value: ''
+  - key: sunilId
+    value: ''
+  - key: pdUsername
+    value: ''
+  - key: pdId
+    value: ''
+  - key: anilUsername
+    value: ''
+  - key: anilId
+    value: ''
+  - key: jayUsername
+    value: ''
+  - key: jayId
+    value: ''
+  - key: pgUsername
+    value: ''
+  - key: pgId
+    value: ''
+  - key: rajeshUsername
+    value: ''
+  - key: rajeshId
+    value: ''
+  - key: approvedRequestId
+    value: ''
+  - key: rejectedRequestId
+    value: ''
+  - key: cancelledRequestId
+    value: ''
+  - key: pendingRequestId
+    value: ''
+  - key: pdRequestId
+    value: ''
+  - key: resetPassword
+    value: ''

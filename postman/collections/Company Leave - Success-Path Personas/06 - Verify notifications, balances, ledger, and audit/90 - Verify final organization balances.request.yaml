@@ -1,0 +1,10 @@
+$kind: http-request
+url: "{{baseUrl}}/balances"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HR final organization balances load', function () { pm.response.to.have.status(200); });
+      pm.test('Approved, rejected, cancelled, and pending requests update balances', function () { const balances = pm.response.json(); const getBalance = function (userKey) { const balance = balances.find(function (x) { return String(x.userId) === pm.environment.get(userKey) && String(x.leaveTypeId) === pm.environment.get('vacationTypeId'); }); pm.expect(balance, userKey + ' Vacation balance exists').to.not.eql(undefined); return balance; }; const anil = getBalance('anilId'); pm.expect(anil.totalDays).to.eql(20); pm.expect(anil.reservedDays).to.eql(0); pm.expect(anil.availableDays).to.eql(20); const jay = getBalance('jayId'); pm.expect(jay.totalDays).to.eql(20); pm.expect(jay.reservedDays).to.eql(0); pm.expect(jay.availableDays).to.eql(20); const pg = getBalance('pgId'); pm.expect(pg.totalDays).to.eql(20); pm.expect(pg.reservedDays).to.eql(0); pm.expect(pg.availableDays).to.eql(20); const rajesh = getBalance('rajeshId'); pm.expect(rajesh.totalDays).to.eql(20); pm.expect(rajesh.reservedDays).to.eql(1); pm.expect(rajesh.availableDays).to.eql(19); const pd = getBalance('pdId'); pm.expect(pd.totalDays).to.eql(19); pm.expect(pd.reservedDays).to.eql(0); pm.expect(pd.availableDays).to.eql(19); });
+    language: text/javascript
+order: 20000

@@ -1,0 +1,11 @@
+$kind: http-request
+url: "{{baseUrl}}/users"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HR can verify created hierarchy', function () { pm.response.to.have.status(200); });
+      const users = pm.response.json();
+      pm.test('New accounts report to expected managers', function () { const byId = {}; users.forEach(function (u) { byId[String(u.id)] = u; }); pm.expect(String(byId[pm.environment.get('sunilId')].managerId)).to.eql(pm.environment.get('hrId')); pm.expect(String(byId[pm.environment.get('pdId')].managerId)).to.eql(pm.environment.get('sunilId')); ['anilId','jayId','pgId','rajeshId'].forEach(function (id) { pm.expect(String(byId[pm.environment.get(id)].managerId)).to.eql(pm.environment.get('pdId')); }); });
+    language: text/javascript
+order: 10000

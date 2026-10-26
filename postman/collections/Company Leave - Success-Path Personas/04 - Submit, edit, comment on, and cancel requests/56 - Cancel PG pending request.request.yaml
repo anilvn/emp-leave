@@ -1,0 +1,10 @@
+$kind: http-request
+url: "{{baseUrl}}/requests/{{cancelledRequestId}}/cancel"
+method: POST
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Pending request is cancelled', function () { pm.response.to.have.status(200); });
+      pm.test('Final status is CANCELLED', function () { pm.expect(pm.response.json().status).to.eql('CANCELLED'); });
+    language: text/javascript
+order: 14000

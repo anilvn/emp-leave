@@ -1,0 +1,8 @@
+$kind: http-request
+url: "{{baseUrl}}/users/managers"
+method: GET
+scripts:
+  - type: afterResponse
+    code: pm.test('Manager options include the new managers', function () { pm.response.to.have.status(200); const managers = pm.response.json().map(function (u) { return String(u.id); }); pm.expect(managers).to.include(pm.environment.get('sunilId')); pm.expect(managers).to.include(pm.environment.get('pdId')); });
+    language: text/javascript
+order: 11000

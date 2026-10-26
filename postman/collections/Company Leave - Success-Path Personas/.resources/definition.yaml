@@ -1,0 +1,24 @@
+$kind: collection
+description: Runs the success-focused HR-to-Sunil-to-PD-to-employee workflow described in postman-req.md. Covers every implemented API route with sequential persona logins, cookie authentication, generated unique users and future weekday dates, captured IDs, and response assertions. Run the full collection from the beginning. This collection creates accounts and changes balances/requests; use a disposable development database. Set Postman SSL certificate verification off for the local self-signed HTTPS proxy. The imported environment defaults to https://localhost/api. GET /auth/me is omitted because no controller route implements it.
+scripts:
+  - type: http:beforeRequest
+    code: |-
+      if (pm.info.requestName === '01 - Login HR' || !pm.environment.get('runId')) {
+        const suffix = new Date().toISOString().replace(/\D/g, '') + Math.random().toString(36).slice(2, 6);
+        pm.environment.set('runId', suffix);
+        ['hrId','sunilId','pdId','anilId','jayId','pgId','rajeshId','approvedRequestId','rejectedRequestId','cancelledRequestId','pendingRequestId','pdRequestId','resetPassword'].forEach(function (k) { pm.environment.unset(k); });
+        pm.environment.set('sunilUsername', 'sunil.' + suffix);
+        pm.environment.set('pdUsername', 'pd.' + suffix);
+        pm.environment.set('anilUsername', 'anil.' + suffix);
+        pm.environment.set('jayUsername', 'jay.' + suffix);
+        pm.environment.set('pgUsername', 'pg.' + suffix);
+        pm.environment.set('rajeshUsername', 'rajesh.' + suffix);
+        let day = new Date(); day.setUTCHours(12, 0, 0, 0);
+        ['dateA','dateB','dateC','dateD'].forEach(function (key) { do { day.setUTCDate(day.getUTCDate() + 1); } while (day.getUTCDay() === 0 || day.getUTCDay() === 6); pm.environment.set(key, day.toISOString().slice(0, 10)); });
+        if (!pm.environment.get('vacationTypeId')) pm.environment.set('vacationTypeId', '1');
+      }
+    language: text/javascript
+auth:
+  - id: ""
+    type: noauth
+    name: No Auth
