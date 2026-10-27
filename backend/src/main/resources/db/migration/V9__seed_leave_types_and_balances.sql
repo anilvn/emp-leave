@@ -7,8 +7,8 @@ SELECT users.id,
        CASE leave_types.name
            WHEN 'Vacation' THEN 20
            WHEN 'Sick' THEN 10
-           WHEN 'Parental' THEN 30
-           WHEN 'Sabbatical' THEN 0
+           WHEN 'Parental' THEN 10
+           WHEN 'Sabbatical' THEN 5
        END,
        0
 FROM users

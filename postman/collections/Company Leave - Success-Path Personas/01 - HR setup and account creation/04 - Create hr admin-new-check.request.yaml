@@ -1,0 +1,23 @@
+$kind: http-request
+url: "{{baseUrl}}/users"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: "{\r
+
+    \    \"username\": \"hr-admin-01\",\r
+
+    \    \"role\": \"HR_ADMIN\",\r
+
+    \    \"managerId\": {{hrId}},\r
+
+    \    \"temporaryPassword\": \"{{temporaryPassword}}\"\r
+
+    }"
+scripts:
+  - type: afterResponse
+    code: ""
+    language: text/javascript
+order: 4102

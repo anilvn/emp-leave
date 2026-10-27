@@ -1,0 +1,9 @@
+$kind: http-request
+url: http://localhost:8080/auth/logout
+method: POST
+queryParams:
+  - key: Cookie
+    value: ""
+    disabled: true
+    description: ""
+order: 1043

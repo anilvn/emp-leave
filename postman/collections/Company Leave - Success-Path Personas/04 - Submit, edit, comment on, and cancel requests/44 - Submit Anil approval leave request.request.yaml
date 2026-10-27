@@ -5,7 +5,17 @@ headers:
   Content-Type: application/json
 body:
   type: json
-  content: '{"leaveTypeId":{{vacationTypeId}},"startDate":"{{dateA}}","endDate":"{{dateA}}","notes":"Postman success-path Anil approval request"}'
+  content: "{\r
+
+    \    \"leaveTypeId\": {{vacationTypeId}},\r
+
+    \    \"startDate\": \"2026-10-28\",\r
+
+    \    \"endDate\": \"2026-10-30\",\r
+
+    \    \"notes\": \"Postman success-path Anil approval request\"\r
+
+    }"
 scripts:
   - type: afterResponse
     code: |-

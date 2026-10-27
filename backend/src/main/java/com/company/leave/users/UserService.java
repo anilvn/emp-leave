@@ -215,7 +215,7 @@ public class UserService {
 
     @Transactional(readOnly = true)
     public List<ManagerOptionResponse> listManagerOptions() {
-        return userRepository.findByRoleIn(List.of(Role.MANAGER, Role.HR_ADMIN)).stream()
+        return userRepository.findByRoleIn(List.of(Role.MANAGER)).stream()
                 .map(user -> ManagerOptionResponse.builder()
                         .id(user.getId())
                         .username(user.getUsername())

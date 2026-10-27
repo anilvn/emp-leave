@@ -15,4 +15,4 @@ scripts:
       pm.test('Created EMPLOYEE has expected manager', function () { pm.expect(created.username).to.eql(pm.environment.get('jayUsername')); pm.expect(created.role).to.eql('EMPLOYEE'); pm.expect(String(created.managerId)).to.eql(pm.environment.get('pdId')); pm.expect(created.mustChangePassword).to.eql(true); });
       pm.environment.set('jayId', String(created.id));
     language: text/javascript
-order: 7000
+order: 8000

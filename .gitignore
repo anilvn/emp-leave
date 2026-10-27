@@ -32,5 +32,8 @@ build/
 ### VS Code ###
 .vscode/
 
+### Frontend dependencies ###
+/frontend/node_modules/
+
 ### Local environment (secrets) ###
 .env

@@ -11,7 +11,13 @@ headers:
   Content-Type: application/json
 body:
   type: json
-  content: '{"username":"{{hrUsername}}","password":"{{seedPassword}}"}'
+  content: "{\r
+
+    \    \"username\": \"{{hrUsername}}\",\r
+
+    \    \"password\": \"{{seedPassword}}\"\r
+
+    }"
 scripts:
   - type: afterResponse
     code: |-
