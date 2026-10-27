@@ -820,6 +820,159 @@ class LeaveRequestControllerIntegrationTest {
         assertThat(jdbcTemplate.queryForObject("select count(*) from leave_requests", Integer.class)).isZero();
     }
 
+    // -------------------------------------------------------------------------
+    // Overlapping leave request validation
+    // -------------------------------------------------------------------------
+
+    @Test
+    void overlappingPendingRequest_returns409() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        // Existing PENDING: 2026-10-29 to 2026-11-03
+        insertRequestWithDates(EMPLOYEE_ID, MANAGER_ID, vacationTypeId, "PENDING",
+                "2026-10-29", "2026-11-03");
+
+        // New request overlaps: 2026-11-02 to 2026-11-06
+        mockMvc.perform(post("/requests")
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "leaveTypeId": %d,
+                                    "startDate": "2026-11-02",
+                                    "endDate": "2026-11-06"
+                                }
+                                """.formatted(vacationTypeId)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("OVERLAPPING_LEAVE_REQUEST"));
+
+        // Only the pre-existing request should exist
+        assertThat(jdbcTemplate.queryForObject("select count(*) from leave_requests", Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    void overlappingApprovedRequest_returns409() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        // Existing APPROVED: 2026-10-29 to 2026-11-03
+        insertRequestWithDates(EMPLOYEE_ID, MANAGER_ID, vacationTypeId, "APPROVED",
+                "2026-10-29", "2026-11-03");
+
+        // New request exactly spans the same range
+        mockMvc.perform(post("/requests")
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "leaveTypeId": %d,
+                                    "startDate": "2026-10-29",
+                                    "endDate": "2026-11-03"
+                                }
+                                """.formatted(vacationTypeId)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("OVERLAPPING_LEAVE_REQUEST"));
+
+        assertThat(jdbcTemplate.queryForObject("select count(*) from leave_requests", Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    void noOverlapWhenExistingRequestIsRejected_returns201() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        // REJECTED request on the same dates must not block
+        insertRequestWithDates(EMPLOYEE_ID, MANAGER_ID, vacationTypeId, "REJECTED",
+                "2026-10-29", "2026-11-03");
+
+        mockMvc.perform(post("/requests")
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "leaveTypeId": %d,
+                                    "startDate": "2026-10-29",
+                                    "endDate": "2026-11-03"
+                                }
+                                """.formatted(vacationTypeId)))
+                .andExpect(status().isCreated());
+
+        assertThat(jdbcTemplate.queryForObject("select count(*) from leave_requests", Integer.class)).isEqualTo(2);
+    }
+
+    @Test
+    void noOverlapWhenExistingRequestIsCancelled_returns201() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        // CANCELLED request on the same dates must not block
+        insertRequestWithDates(EMPLOYEE_ID, MANAGER_ID, vacationTypeId, "CANCELLED",
+                "2026-10-29", "2026-11-03");
+
+        mockMvc.perform(post("/requests")
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "leaveTypeId": %d,
+                                    "startDate": "2026-10-29",
+                                    "endDate": "2026-11-03"
+                                }
+                                """.formatted(vacationTypeId)))
+                .andExpect(status().isCreated());
+
+        assertThat(jdbcTemplate.queryForObject("select count(*) from leave_requests", Integer.class)).isEqualTo(2);
+    }
+
+    @Test
+    void adjacentRanges_noOverlap_returns201() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        // First request: Mon 2026-11-09 to Fri 2026-11-13
+        insertRequestWithDates(EMPLOYEE_ID, MANAGER_ID, vacationTypeId, "PENDING",
+                "2026-11-09", "2026-11-13");
+
+        // Second request immediately follows: Mon 2026-11-16 to Mon 2026-11-16
+        mockMvc.perform(post("/requests")
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "leaveTypeId": %d,
+                                    "startDate": "2026-11-16",
+                                    "endDate": "2026-11-16"
+                                }
+                                """.formatted(vacationTypeId)))
+                .andExpect(status().isCreated());
+
+        assertThat(jdbcTemplate.queryForObject("select count(*) from leave_requests", Integer.class)).isEqualTo(2);
+    }
+
+    @Test
+    void overlappingRequestIsNotSavedAndBalanceIsUnchanged() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+        insertRequestWithDates(EMPLOYEE_ID, MANAGER_ID, vacationTypeId, "PENDING",
+                "2026-10-29", "2026-11-03");
+
+        int ledgerBefore = jdbcTemplate.queryForObject("select count(*) from balance_ledger", Integer.class);
+        Integer reservedBefore = jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId);
+
+        mockMvc.perform(post("/requests")
+                        .with(authenticatedAs(EMPLOYEE_ID, "EMPLOYEE"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "leaveTypeId": %d,
+                                    "startDate": "2026-10-30",
+                                    "endDate": "2026-11-02"
+                                }
+                                """.formatted(vacationTypeId)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("OVERLAPPING_LEAVE_REQUEST"));
+
+        // No new request row and no balance change
+        assertThat(jdbcTemplate.queryForObject("select count(*) from leave_requests", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from balance_ledger", Integer.class))
+                .isEqualTo(ledgerBefore);
+        assertThat(jdbcTemplate.queryForObject(
+                "select reserved_days from leave_balances where user_id = ? and leave_type_id = ?",
+                Integer.class, EMPLOYEE_ID, vacationTypeId)).isEqualTo(reservedBefore);
+    }
+
     @Test
     void ownerCanEditPendingRequestAndChangedReservationIsAudited() throws Exception {
         long vacationTypeId = leaveTypeId("Vacation");
@@ -1743,6 +1896,17 @@ class LeaveRequestControllerIntegrationTest {
                 ) values (?, ?, ?, '2026-10-29', '2026-10-29', 1, ?, now())
                 returning id
                 """, Long.class, employeeId, approverId, leaveTypeId, status);
+    }
+
+    private long insertRequestWithDates(long employeeId, long approverId, long leaveTypeId,
+                                        String status, String startDate, String endDate) {
+        return jdbcTemplate.queryForObject("""
+                insert into leave_requests (
+                    employee_id, approver_id, leave_type_id, start_date, end_date,
+                    working_days, status, submitted_at
+                ) values (?, ?, ?, cast(? as date), cast(? as date), 1, ?, now())
+                returning id
+                """, Long.class, employeeId, approverId, leaveTypeId, startDate, endDate, status);
     }
 
     private void dropNotificationFailureTrigger() {

@@ -7,4 +7,4 @@ scripts:
       pm.test('Employee can list own requests', function () { pm.response.to.have.status(200); });
       pm.test('Created Anil request appears in list', function () { pm.expect(pm.response.json().some(function (r) { return String(r.id) === pm.environment.get('approvedRequestId'); })).to.eql(true); });
     language: text/javascript
-order: 3000
+order: 4000

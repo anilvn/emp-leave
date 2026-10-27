@@ -5,7 +5,8 @@ headers:
   Content-Type: application/json
 body:
   type: json
-  content: '{"leaveTypeId":{{vacationTypeId}},"startDate":"{{dateD}}","endDate":"{{dateD}}","notes":"Postman success-path PG cancellation request"}'
+  content: '{"leaveTypeId":{{vacationTypeId}},"startDate":"{{dateD}}","endDate":"{{dateD}}","notes":"Postman
+    success-path PG cancellation request"}'
 scripts:
   - type: afterResponse
     code: |-
@@ -15,4 +16,4 @@ scripts:
       pm.test('Request ID is returned', function () { pm.expect(request.id).to.be.a('number').and.above(0); });
       pm.environment.set('cancelledRequestId', String(request.id));
     language: text/javascript
-order: 13000
+order: 14000

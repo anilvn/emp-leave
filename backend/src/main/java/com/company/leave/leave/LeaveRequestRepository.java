@@ -1,6 +1,7 @@
 package com.company.leave.leave;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -55,6 +56,19 @@ interface LeaveRequestRepository extends Repository<LeaveRequest, Long> {
             """)
     List<LeaveRequest> findPendingAssignedTo(
             @Param("approverId") long approverId, @Param("status") RequestStatus status);
+
+    @Query("""
+            select count(r) from LeaveRequest r
+            where r.employeeId = :employeeId
+              and r.status in :statuses
+              and r.startDate <= :endDate
+              and r.endDate >= :startDate
+            """)
+    long countOverlapping(
+            @Param("employeeId") long employeeId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate,
+            @Param("statuses") Collection<RequestStatus> statuses);
 
     @Query(value = """
             select *

@@ -15,4 +15,4 @@ scripts:
       pm.environment.set('jayId', String(user.id));
       pm.test('Secure access cookie is issued', function () { pm.expect(pm.response.headers.get('Set-Cookie') || '').to.include('access_token='); });
     language: text/javascript
-order: 10000
+order: 11000

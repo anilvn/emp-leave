@@ -5,7 +5,7 @@ package com.company.leave.common;
  * {@code application/problem+json} response (AD-11).
  *
  * <p>This enum must mirror {@code openapi.yaml}'s {@code ProblemDetail.code} enum
- * exactly: the same 10 values, no extras, none missing.
+ * exactly: the same 11 values, no extras, none missing.
  */
 public enum ErrorCode {
     ACCESS_DENIED,
@@ -17,5 +17,6 @@ public enum ErrorCode {
     LEAVE_TYPE_CHANGE_NOT_ALLOWED,
     COMMENT_REQUIRED,
     ACCOUNT_LOCKED,
-    PASSWORD_CHANGE_REQUIRED
+    PASSWORD_CHANGE_REQUIRED,
+    OVERLAPPING_LEAVE_REQUEST
 }

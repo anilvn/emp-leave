@@ -5,7 +5,8 @@ headers:
   Content-Type: application/json
 body:
   type: json
-  content: '{"leaveTypeId":{{vacationTypeId}},"startDate":"{{dateC}}","endDate":"{{dateC}}","notes":"Postman success-path Jay rejection request"}'
+  content: '{"leaveTypeId":{{vacationTypeId}},"startDate":"{{dateC}}","endDate":"{{dateC}}","notes":"Postman
+    success-path Jay rejection request"}'
 scripts:
   - type: afterResponse
     code: |-
@@ -15,4 +16,4 @@ scripts:
       pm.test('Request ID is returned', function () { pm.expect(request.id).to.be.a('number').and.above(0); });
       pm.environment.set('rejectedRequestId', String(request.id));
     language: text/javascript
-order: 11000
+order: 12000

@@ -25,4 +25,4 @@ scripts:
       pm.test('Request ID is returned', function () { pm.expect(request.id).to.be.a('number').and.above(0); });
       pm.environment.set('approvedRequestId', String(request.id));
     language: text/javascript
-order: 2000
+order: 2348

@@ -442,11 +442,26 @@ public class LeaveRequestService {
                     "Range yields zero working days");
         }
 
-        // 4. Determine approver: caller's manager, or self for HR with null manager
+        // 4. Reject if the employee already has a pending or approved request that overlaps
+        // ---current---
+        // 4. Reject if the employee already has a pending request that overlaps
+        if (leaveRequestRepository.countOverlapping(
+                actorId,
+                request.getStartDate(),
+                request.getEndDate(),
+//                List.of(RequestStatus.PENDING, RequestStatus.APPROVED)) > 0) {
+                List.of(RequestStatus.PENDING)) > 0) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    ErrorCode.OVERLAPPING_LEAVE_REQUEST,
+                    "A pending or approved leave request already overlaps the requested dates.");
+        }
+
+        // 5. Determine approver: caller's manager, or self for HR with null manager
         Long managerId = userService.getManagerId(actorId);
         long approverId = managerId != null ? managerId : actorId;
 
-        // 5. Insert request
+        // 6. Insert request
         LeaveRequest leaveRequest = LeaveRequest.builder()
                 .employeeId(actorId)
                 .approverId(approverId)
@@ -460,10 +475,10 @@ public class LeaveRequestService {
                 .build();
         leaveRequest = leaveRequestRepository.save(leaveRequest);
 
-        // 6. Reserve balance (checks availability, updates reserved_days, writes ledger row)
+        // 7. Reserve balance (checks availability, updates reserved_days, writes ledger row)
         balanceService.reserve(actorId, request.getLeaveTypeId(), workingDays, actorId, leaveRequest.getId());
 
-        // 7. Audit
+        // 8. Audit
         String detail = "Submitted " + leaveTypeName + ", "
                 + describeRange(leaveRequest.getStartDate(), leaveRequest.getEndDate(), workingDays) + ".";
         auditService.recordEvent(

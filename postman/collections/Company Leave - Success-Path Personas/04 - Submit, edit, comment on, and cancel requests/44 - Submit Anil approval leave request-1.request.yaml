@@ -1,0 +1,29 @@
+$kind: http-request
+name: 44 - Submit Anil approval leave request
+url: "{{baseUrl}}/requests"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: "{\r
+
+    \    \"leaveTypeId\": {{vacationTypeId}},\r
+
+    \    \"startDate\": \"2026-10-28\",\r
+
+    \    \"endDate\": \"2026-10-30\",\r
+
+    \    \"notes\": \"Postman success-path Anil approval request\"\r
+
+    }"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Request created', function () { pm.response.to.have.status(201); });
+      const request = pm.response.json();
+      pm.test('Request is pending with expected owner, approver, type, and dates', function () { pm.expect(request.status).to.eql('PENDING'); pm.expect(request.workingDays).to.eql(1); pm.expect(String(request.employeeId)).to.eql(pm.environment.get('anilId')); pm.expect(String(request.approverId)).to.eql(pm.environment.get('pdId')); pm.expect(String(request.leaveTypeId)).to.eql(pm.environment.get('vacationTypeId')); pm.expect(request.startDate).to.eql(pm.environment.get('dateA')); pm.expect(request.endDate).to.eql(pm.environment.get('dateA')); });
+      pm.test('Request ID is returned', function () { pm.expect(request.id).to.be.a('number').and.above(0); });
+      pm.environment.set('approvedRequestId', String(request.id));
+    language: text/javascript
+order: 2000

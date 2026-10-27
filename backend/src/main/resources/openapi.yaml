@@ -360,18 +360,30 @@ paths:
                 instance: /api/requests
                 code: VALIDATION_FAILED
         '409':
-          description: Requested days exceed available balance (FR31)
+          description: Requested days exceed available balance, or dates overlap an existing pending/approved request
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetail'
-              example:
-                type: about:blank
-                title: Insufficient balance
-                status: 409
-                detail: Requested 4 working days of Vacation but only 2 days are available (6 total, 4 already reserved).
-                instance: /api/requests
-                code: INSUFFICIENT_BALANCE
+              examples:
+                insufficientBalance:
+                  summary: Insufficient leave balance
+                  value:
+                    type: about:blank
+                    title: Insufficient balance
+                    status: 409
+                    detail: Requested 4 working days of Vacation but only 2 days are available (6 total, 4 already reserved).
+                    instance: /api/requests
+                    code: INSUFFICIENT_BALANCE
+                overlappingLeaveRequest:
+                  summary: Dates overlap an existing pending or approved request
+                  value:
+                    type: about:blank
+                    title: Overlapping leave request
+                    status: 409
+                    detail: A pending or approved leave request already overlaps the requested dates.
+                    instance: /api/requests
+                    code: OVERLAPPING_LEAVE_REQUEST
 
   /requests/{requestId}:
     parameters:
@@ -2620,7 +2632,8 @@ components:
             (AD-11). The full set used by this contract: ACCESS_DENIED,
             VALIDATION_FAILED, INVALID_TRANSITION, INSUFFICIENT_BALANCE,
             NOT_FOUND, INVALID_CREDENTIALS, LEAVE_TYPE_CHANGE_NOT_ALLOWED,
-            COMMENT_REQUIRED, ACCOUNT_LOCKED, PASSWORD_CHANGE_REQUIRED.
+            COMMENT_REQUIRED, ACCOUNT_LOCKED, PASSWORD_CHANGE_REQUIRED,
+            OVERLAPPING_LEAVE_REQUEST.
           enum:
             - ACCESS_DENIED
             - VALIDATION_FAILED
@@ -2632,6 +2645,7 @@ components:
             - COMMENT_REQUIRED
             - ACCOUNT_LOCKED
             - PASSWORD_CHANGE_REQUIRED
+            - OVERLAPPING_LEAVE_REQUEST
       example:
         type: about:blank
         title: Insufficient balance
