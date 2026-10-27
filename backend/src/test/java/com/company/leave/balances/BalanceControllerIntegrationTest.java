@@ -65,9 +65,9 @@ class BalanceControllerIntegrationTest {
     @AfterEach
     void restoreSeededRowsAndAuthState() {
         jdbcTemplate.update("update users set must_change_password = false where id = 5");
-        jdbcTemplate.update("update leave_balances set reserved_days = 0");
+        jdbcTemplate.update("update leave_balances set reserved_days = 0, available_days = total_days");
         jdbcTemplate.update("""
-                insert into leave_balances (user_id, leave_type_id, total_days, reserved_days)
+                insert into leave_balances (user_id, leave_type_id, total_days, reserved_days, available_days)
                 select users.id,
                        leave_types.id,
                        case leave_types.name
@@ -76,12 +76,19 @@ class BalanceControllerIntegrationTest {
                            when 'Parental' then 30
                            when 'Sabbatical' then 0
                        end,
-                       0
+                       0,
+                       case leave_types.name
+                           when 'Vacation' then 20
+                           when 'Sick' then 10
+                           when 'Parental' then 30
+                           when 'Sabbatical' then 0
+                       end
                 from users
                 cross join leave_types
                 on conflict (user_id, leave_type_id) do update
-                    set total_days = excluded.total_days,
-                        reserved_days = 0
+                    set total_days    = excluded.total_days,
+                        reserved_days = 0,
+                        available_days = excluded.total_days
                 """);
     }
 
@@ -125,7 +132,7 @@ class BalanceControllerIntegrationTest {
     void returnsTheRequestedUsersBalanceRows() throws Exception {
         long vacationTypeId = leaveTypeId("Vacation");
         jdbcTemplate.update(
-                "update leave_balances set total_days = 17, reserved_days = 2 "
+                "update leave_balances set total_days = 17, reserved_days = 2, available_days = 15 "
                         + "where user_id = 3 and leave_type_id = ?",
                 vacationTypeId);
 
@@ -152,7 +159,7 @@ class BalanceControllerIntegrationTest {
     void availableDaysSubtractsReservations() throws Exception {
         long vacationTypeId = leaveTypeId("Vacation");
         jdbcTemplate.update(
-                "update leave_balances set reserved_days = 4 where user_id = 5 and leave_type_id = ?",
+                "update leave_balances set reserved_days = 4, available_days = 16 where user_id = 5 and leave_type_id = ?",
                 vacationTypeId);
 
         MvcResult result = mockMvc.perform(get("/balances/me").with(authenticatedAs(5L, "EMPLOYEE")))
@@ -205,8 +212,9 @@ class BalanceControllerIntegrationTest {
             assertThat(jdbcTemplate.queryForObject("""
                             select count(*) from leave_balances balances
                             join leave_types types on types.id = balances.leave_type_id
-                            where types.name = ? and balances.total_days = ? and balances.reserved_days = 0
-                            """, Integer.class, expected.getKey(), expected.getValue()))
+                            where types.name = ? and balances.total_days = ?
+                              and balances.reserved_days = 0 and balances.available_days = ?
+                            """, Integer.class, expected.getKey(), expected.getValue(), expected.getValue()))
                     .isEqualTo(12);
         }
     }
@@ -235,6 +243,34 @@ class BalanceControllerIntegrationTest {
                         Integer.class,
                         vacationTypeId))
                 .isEqualTo(20);
+    }
+
+    @Test
+    void availableDaysColumnIsPersistedAfterReservation() throws Exception {
+        long vacationTypeId = leaveTypeId("Vacation");
+
+        // Reserve via set (which triggers a service write), then verify the DB column is updated
+        mockMvc.perform(put("/balances/{userId}/{typeId}", 5L, vacationTypeId)
+                        .with(authenticatedAs(1L, "HR_ADMIN"))
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"totalDays\":20,\"reason\":\"Reset to 20\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.availableDays").value(20));
+
+        Integer dbAvailable = jdbcTemplate.queryForObject(
+                "select available_days from leave_balances where user_id = 5 and leave_type_id = ?",
+                Integer.class, vacationTypeId);
+        assertThat(dbAvailable).isEqualTo(20);
+    }
+
+    @Test
+    void availableDaysConstraintRejectsInconsistentValue() {
+        long vacationTypeId = leaveTypeId("Vacation");
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                        "update leave_balances set available_days = 5 where user_id = 5 and leave_type_id = ?",
+                        vacationTypeId))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
@@ -334,7 +370,7 @@ class BalanceControllerIntegrationTest {
     void setBalanceBelowReservedDaysGets409() throws Exception {
         long vacationTypeId = leaveTypeId("Vacation");
         jdbcTemplate.update(
-                "update leave_balances set reserved_days = 4 where user_id = 5 and leave_type_id = ?",
+                "update leave_balances set reserved_days = 4, available_days = 16 where user_id = 5 and leave_type_id = ?",
                 vacationTypeId);
 
         mockMvc.perform(put("/balances/{userId}/{typeId}", 5L, vacationTypeId)
@@ -432,7 +468,7 @@ class BalanceControllerIntegrationTest {
     void adjustBalanceBelowReservedDaysGets409() throws Exception {
         long vacationTypeId = leaveTypeId("Vacation");
         jdbcTemplate.update(
-                "update leave_balances set reserved_days = 10 where user_id = 5 and leave_type_id = ?",
+                "update leave_balances set reserved_days = 10, available_days = 10 where user_id = 5 and leave_type_id = ?",
                 vacationTypeId);
 
         mockMvc.perform(post("/balances/{userId}/{typeId}/adjust", 5L, vacationTypeId)

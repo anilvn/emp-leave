@@ -61,7 +61,7 @@ public class BalanceService {
                         HttpStatus.CONFLICT, ErrorCode.INSUFFICIENT_BALANCE,
                         "No balance row exists for userId=" + userId + " leaveTypeId=" + leaveTypeId));
 
-        int available = balance.getTotalDays() - balance.getReservedDays();
+        int available = balance.getAvailableDays();
         if (workingDays > available) {
             throw new ApiException(
                     HttpStatus.CONFLICT,
@@ -226,9 +226,9 @@ public class BalanceService {
         return BalanceResponse.builder()
                 .userId(userId)
                 .leaveTypeId(leaveTypeId)
-                .totalDays(newTotalDays)
+                .totalDays(balance.getTotalDays())
                 .reservedDays(balance.getReservedDays())
-                .availableDays(newTotalDays - balance.getReservedDays())
+                .availableDays(balance.getAvailableDays())
                 .build();
     }
 
@@ -274,9 +274,9 @@ public class BalanceService {
         return BalanceResponse.builder()
                 .userId(userId)
                 .leaveTypeId(leaveTypeId)
-                .totalDays(newTotal)
+                .totalDays(balance.getTotalDays())
                 .reservedDays(balance.getReservedDays())
-                .availableDays(newTotal - balance.getReservedDays())
+                .availableDays(balance.getAvailableDays())
                 .build();
     }
 
@@ -310,7 +310,7 @@ public class BalanceService {
                         .leaveTypeId(b.getId().getLeaveTypeId())
                         .totalDays(b.getTotalDays())
                         .reservedDays(b.getReservedDays())
-                        .availableDays(b.getTotalDays() - b.getReservedDays())
+                        .availableDays(b.getAvailableDays())
                         .build())
                 .toList();
     }
@@ -318,12 +318,13 @@ public class BalanceService {
     private BalanceResponse toBalanceResponse(long userId, LeaveTypeResponse leaveType, LeaveBalance balance) {
         int totalDays = balance == null ? 0 : balance.getTotalDays();
         int reservedDays = balance == null ? 0 : balance.getReservedDays();
+        int availableDays = balance == null ? 0 : balance.getAvailableDays();
         return BalanceResponse.builder()
                 .userId(userId)
                 .leaveTypeId(leaveType.getId())
                 .totalDays(totalDays)
                 .reservedDays(reservedDays)
-                .availableDays(totalDays - reservedDays)
+                .availableDays(availableDays)
                 .build();
     }
 }

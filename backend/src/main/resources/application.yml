@@ -4,7 +4,7 @@ spring:
   profiles:
     default: dev
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/leave}
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/leave-2}
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:anil}
   jpa:

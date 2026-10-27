@@ -24,6 +24,14 @@ class LeaveBalance {
     @Column(name = "reserved_days", nullable = false)
     private int reservedDays;
 
+    @Column(name = "available_days")
+    @Getter(AccessLevel.NONE)
+    private Integer availableDays;
+
+    int getAvailableDays() {
+        return availableDays != null ? availableDays : totalDays - reservedDays;
+    }
+
     /**
      * Increases {@code reservedDays} by {@code delta}. The caller must have already
      * verified that the balance has enough available days; the database CHECK constraint
@@ -34,6 +42,7 @@ class LeaveBalance {
             throw new IllegalArgumentException("delta must be positive");
         }
         this.reservedDays += delta;
+        this.availableDays = this.totalDays - this.reservedDays;
     }
 
     void adjustReservation(int delta) {
@@ -42,14 +51,18 @@ class LeaveBalance {
             throw new IllegalArgumentException("adjusted reservation must remain within the balance");
         }
         this.reservedDays = updatedReservedDays;
+        this.availableDays = this.totalDays - this.reservedDays;
     }
 
     void deductReservedDays(int days) {
         if (days <= 0 || days > reservedDays || days > totalDays) {
             throw new IllegalArgumentException("deduction must not exceed reserved or total days");
         }
+        this.availableDays = this.totalDays - this.reservedDays;
         this.reservedDays -= days;
-        this.totalDays -= days;
+//        this.totalDays -= days;
+        // available = (total - days) - (reserved - days) = total - reserved: unchanged
+
     }
 
     /** Creates a new balance row with zero reserved days. Used by HR set when no row exists yet. */
@@ -57,10 +70,12 @@ class LeaveBalance {
         this.id = id;
         this.totalDays = totalDays;
         this.reservedDays = 0;
+        this.availableDays = totalDays;
     }
 
     /** Sets total days; the caller must have verified newTotal >= reservedDays. */
     void setTotalDays(int newTotal) {
         this.totalDays = newTotal;
+        this.availableDays = this.totalDays - this.reservedDays;
     }
 }
